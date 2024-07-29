@@ -11,6 +11,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -23,6 +24,7 @@ import (
 	"github.com/bnb-chain/tss-lib/v2/test"
 	"github.com/bnb-chain/tss-lib/v2/tss"
 	"github.com/btcsuite/btcd/btcec/v2"
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
@@ -136,10 +138,27 @@ signing:
 				digestPadded := make([]byte, 32)
 				digestPadded[31] = 42
 
-				recoveredKey, err := ethcrypto.Ecrecover(digestPadded, utils.EcdsaSignatureToEth(R, sumS))
+				sig := utils.EcdsaSignatureToEth(R, sumS)
+				recoveredKey, err := ethcrypto.Ecrecover(digestPadded, sig)
 				assert.NoError(t, err)
 				assert.True(t, bytes.Equal(recoveredKey, utils.EcdsaPublicKeyToBytes(&pk)), "ecrecover must pass")
 
+				res := struct {
+					RSmall, S, Digest string
+					V                 byte
+					Pk, EthPk         string
+				}{
+					RSmall: "0x" + ethcommon.Bytes2Hex(sig[:32]),
+					S:      "0x" + ethcommon.Bytes2Hex(sig[32:64]),
+					Digest: "0x" + ethcommon.Bytes2Hex(digestPadded),
+					V:      sig[64] + 27,
+					Pk:     "0x" + ethcommon.Bytes2Hex(utils.EcdsaPublicKeyToBytes(&pk)),
+					EthPk:  "0x" + ethcommon.Bytes2Hex(ethcommon.LeftPadBytes(ethcrypto.Keccak256(utils.EcdsaPublicKeyToBytes(&pk)[1:])[12:], 32)),
+				}
+				bts, err := json.MarshalIndent(res, "", "  ")
+				assert.NoError(t, err)
+
+				fmt.Println("signature result:", string(bts))
 				break signing
 			}
 		}
