@@ -7,15 +7,21 @@
 package ethereum
 
 import (
+	"crypto/ecdsa"
 	"math/big"
 
 	"github.com/bnb-chain/tss-lib/v2/crypto"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
+var (
+	secp256k1N     = ethcrypto.S256().Params().N
+	secp256k1halfN = new(big.Int).Div(secp256k1N, big.NewInt(2))
+)
+
 func AddVtoSig(v byte, mySig []byte) []byte {
 	recID := v
-	sig := append(mySig, []byte{recID}...)
+	sig := append(mySig, recID)
 	return sig
 }
 
@@ -25,11 +31,6 @@ func CreateRecID(R *crypto.ECPoint, sumS *big.Int) byte {
 	sigv := 27 + v
 	return sigv
 }
-
-var (
-	secp256k1N     = ethcrypto.S256().Params().N
-	secp256k1halfN = new(big.Int).Div(secp256k1N, big.NewInt(2))
-)
 
 func IsBigS(s *big.Int) bool {
 	return s.Cmp(secp256k1halfN) > 0
@@ -63,4 +64,23 @@ func IsEven(nm *big.Int) bool {
 	One := big.NewInt(1)
 	tmp := One.And(One, nm)
 	return tmp.Cmp(big.NewInt(0)) == 0
+}
+
+func pubkeyToEth(p *ecdsa.PublicKey) []byte {
+	return ethcrypto.FromECDSAPub(p)
+}
+
+func EcdsaToEthHelper(R *crypto.ECPoint, s *big.Int) []byte {
+	v := CreateV(R, s)
+	sig := make([]byte, 65)
+	copy(sig[0:32], R.X().Bytes())
+	copy(sig[32:64], s.Bytes())
+	sig[64] = v
+	return sig
+}
+
+func EcdsaToEthContract(R *crypto.ECPoint, s *big.Int) []byte {
+	sig := EcdsaToEthHelper(R, s)
+	sig[len(sig)-1] += 27
+	return sig
 }
