@@ -11,6 +11,7 @@ import (
 	"math/big"
 
 	"github.com/bnb-chain/tss-lib/v2/crypto"
+	"github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -18,6 +19,10 @@ var (
 	secp256k1N     = ethcrypto.S256().Params().N
 	secp256k1halfN = new(big.Int).Div(secp256k1N, big.NewInt(2))
 )
+
+func EcdsaPublicKeyToBytes(pk *ecdsa.PublicKey) []byte {
+	return ethcrypto.FromECDSAPub(pk)
+}
 
 func AddVtoSig(v byte, mySig []byte) []byte {
 	recID := v
@@ -70,17 +75,18 @@ func pubkeyToEth(p *ecdsa.PublicKey) []byte {
 	return ethcrypto.FromECDSAPub(p)
 }
 
-func EcdsaToEthHelper(R *crypto.ECPoint, s *big.Int) []byte {
+func EcdsaSignatureToEth(R *crypto.ECPoint, s *big.Int) []byte {
 	v := CreateV(R, s)
 	sig := make([]byte, 65)
-	copy(sig[0:32], R.X().Bytes())
-	copy(sig[32:64], s.Bytes())
+
+	copy(sig[0:32], common.LeftPadBytes(R.X().Bytes(), 32))
+	copy(sig[32:64], common.LeftPadBytes(s.Bytes(), 32))
 	sig[64] = v
 	return sig
 }
 
 func EcdsaToEthContract(R *crypto.ECPoint, s *big.Int) []byte {
-	sig := EcdsaToEthHelper(R, s)
+	sig := EcdsaSignatureToEth(R, s)
 	sig[len(sig)-1] += 27
 	return sig
 }

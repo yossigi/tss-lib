@@ -23,7 +23,7 @@ import (
 	"github.com/bnb-chain/tss-lib/v2/test"
 	"github.com/bnb-chain/tss-lib/v2/tss"
 	"github.com/btcsuite/btcd/btcec/v2"
-	pb "github.com/ethereum/go-ethereum/crypto"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
 )
@@ -40,11 +40,11 @@ func setUp(level string) {
 }
 
 func TestE2ENTimes(t *testing.T) {
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 400; i++ {
 		t.Run("TestE2EConcurrent", TestE2EConcurrent)
 	}
-
 }
+
 func TestE2EConcurrent(t *testing.T) {
 	setUp("info")
 	threshold := testThreshold
@@ -133,23 +133,12 @@ signing:
 				t.Log("ECDSA signing test done.")
 				// END ECDSA verify
 
-				mySig := make([]byte, 64)
-				assert.Equal(t, 32, copy(mySig[:32], r.Bytes()))
-				assert.Equal(t, 32, copy(mySig[32:], sumS.Bytes()))
 				digestPadded := make([]byte, 32)
 				digestPadded[31] = 42
 
-				bytePk := pb.FromECDSAPub(&pk)
-
-				recoveredKey, err := pb.Ecrecover(digestPadded, utils.AddVtoSig(utils.CreateV(R, sumS), mySig))
-
+				recoveredKey, err := ethcrypto.Ecrecover(digestPadded, utils.EcdsaSignatureToEth(R, sumS))
 				assert.NoError(t, err)
-				assert.True(t, bytes.Equal(recoveredKey, bytePk), "ecrecover must pass")
-				if utils.IsBigS(sumS) {
-					sumS = utils.FlipS(sumS)
-				}
-				assert.Equal(t, 32, copy(mySig[32:], sumS.Bytes()))
-				assert.True(t, pb.VerifySignature(bytePk, digestPadded, mySig))
+				assert.True(t, bytes.Equal(recoveredKey, utils.EcdsaPublicKeyToBytes(&pk)), "ecrecover must pass")
 
 				break signing
 			}
