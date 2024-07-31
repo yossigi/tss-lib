@@ -76,6 +76,7 @@ func newImpl(p *Parameters) *Impl {
 		PeerContext: pctx,
 		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
 		KeygenHandler: &KeygenHandler{
+			StoragePath:       p.SaveDirPath,
 			Out:               make(chan tss.Message, len(p.partyIDs)),
 			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
 			// to be set correctly in Start()
@@ -88,8 +89,9 @@ func newImpl(p *Parameters) *Impl {
 			OutChan:          make(chan tss.Message, len(p.partyIDs)),           // TODO: consider best buffer size.
 			SigPartReadyChan: make(chan *common.SignatureData, len(p.partyIDs)), // TODO: consider best buffer size.
 		},
+		incomingMessagesChannel: make(chan tss.Message),
 
-		// TODO: ensure this is needed at all:
+		// TODO: not sure this is needed
 		IdToPIDmapping: map[string]*tss.PartyID{},
 	}
 	return i

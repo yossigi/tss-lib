@@ -2,6 +2,9 @@ package player
 
 import (
 	"crypto/ecdsa"
+	"errors"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,8 +15,8 @@ import (
 )
 
 type KeygenHandler struct {
-	LocalParty tss.Party
-
+	LocalParty  tss.Party
+	StoragePath string
 	// communication channels
 	Out               <-chan tss.Message
 	ProtocolEndOutput <-chan *keygen.LocalPartySaveData
@@ -45,25 +48,69 @@ type Impl struct {
 	KeygenHandler  *KeygenHandler
 	SigningHandler *SigningHandler
 
+	incomingMessagesChannel chan tss.Message
+
 	IdToPIDmapping map[string]*tss.PartyID
 }
 
-func (i Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error) {
+func (k *KeygenHandler) setup(outChan tss.Message) {
+	// either create a new localParty, or load from storage
+
+}
+
+func (p *Impl) messageHandler() {
+	// TODO implement me
+}
+
+func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error) {
+	// TODO: spin up msg handlers.
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go p.messageHandler()
+	}
+
+	p.KeygenHandler.setup(outChannel)
+	// TODO implement me
+
+	panic("implement me")
+}
+
+func (p *Impl) Stop() {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (i Impl) Stop() {
+func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (i Impl) AsyncRequestNewSignature(digest Digest) error {
-	// TODO implement me
-	panic("implement me")
+type protocolType int
+
+const (
+	unknownProtocolType protocolType = iota
+	keygenProtocolType
+	signingProtocolType
+)
+
+func (p *Impl) Update(message tss.ParsedMessage) error {
+	switch findProtocolType(message) {
+	case keygenProtocolType:
+		return nil
+	case signingProtocolType:
+		return nil
+	default:
+		return errors.New("unknown protocol type")
+	}
 }
 
-func (i Impl) Update(message tss.ParsedMessage) error {
-	// TODO implement me
-	panic("implement me")
+func findProtocolType(message tss.ParsedMessage) protocolType {
+	fullMessageStructName := message.Type()
+	if strings.Contains(fullMessageStructName, "keygen") {
+		return keygenProtocolType
+	}
+	if strings.Contains(fullMessageStructName, "signing") {
+		return signingProtocolType
+	}
+	return unknownProtocolType
 }
