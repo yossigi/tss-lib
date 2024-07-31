@@ -7,23 +7,27 @@
 package signing
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"runtime"
 	"sync/atomic"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/ipfs/go-log"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/bnb-chain/tss-lib/v2/common"
+	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
 	"github.com/bnb-chain/tss-lib/v2/test"
 	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/btcsuite/btcd/btcec/v2"
+	ethcommon "github.com/ethereum/go-ethereum/common"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ipfs/go-log"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -34,6 +38,12 @@ const (
 func setUp(level string) {
 	if err := log.SetLogLevel("tss-lib", level); err != nil {
 		panic(err)
+	}
+}
+
+func TestE2ENTimes(t *testing.T) {
+	for i := 0; i < 400; i++ {
+		t.Run("TestE2EConcurrent", TestE2EConcurrent)
 	}
 }
 
@@ -125,6 +135,29 @@ signing:
 				t.Log("ECDSA signing test done.")
 				// END ECDSA verify
 
+				digestPadded := make([]byte, 32)
+				digestPadded[31] = 42
+
+				sig := utils.EcdsaSignatureToEth(R, sumS)
+				recoveredKey, err := ethcrypto.Ecrecover(digestPadded, sig)
+				assert.NoError(t, err)
+				assert.True(t, bytes.Equal(recoveredKey, utils.EcdsaPublicKeyToBytes(&pk)), "ecrecover must pass")
+
+				ethSig, err := utils.EcdsaToEthContractSignature(digestPadded, R, sumS)
+				assert.NoError(t, err)
+
+				res := struct {
+					utils.EthContractSignature
+					Pk, EthPk string
+				}{
+					EthContractSignature: ethSig,
+					Pk:                   "0x" + ethcommon.Bytes2Hex(utils.EcdsaPublicKeyToBytes(&pk)),
+					EthPk:                "0x" + ethcommon.Bytes2Hex(ethcommon.LeftPadBytes(ethcrypto.Keccak256(utils.EcdsaPublicKeyToBytes(&pk)[1:])[12:], 32)),
+				}
+				bts, err := json.MarshalIndent(res, "", "  ")
+				assert.NoError(t, err)
+
+				fmt.Println("signature result:", string(bts))
 				break signing
 			}
 		}
