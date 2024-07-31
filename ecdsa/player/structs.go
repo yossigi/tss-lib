@@ -33,12 +33,13 @@ type Parameters struct {
 type Digest [32]byte
 
 type FullParty interface {
-	// Start will set up the FullParty, and few sub-components (including few goroutines).
-	// outChannel: will be used by this Party to request messages to be sent outside,
-	//      these messages can be either broadcast requests (using protocol like reliable broadcast),
-	//      or uni-cast requests (which should be encrypted)
-	// signatureOutputChannel: will be used by this Party to output a signature
-	//      which should be aggragated by a relay and constructed into a single ecdsa signature.
+	// Start will set up the FullParty, and few sub-components (including few
+	// goroutines). outChannel: will be used by this Party to request messages
+	// to be sent outside, these messages can be either broadcast requests
+	// (using protocol like reliable broadcast), or unicast requests (which
+	// should be encrypted) signatureOutputChannel: will be used by this Party
+	// to output a signature which should be aggragated by a relay and
+	// constructed into a single ecdsa signature.
 	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature)
 
 	// Stop will Stop the FullPlarty
