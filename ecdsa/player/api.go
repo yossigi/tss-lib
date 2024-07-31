@@ -30,6 +30,7 @@ type Parameters struct {
 	// to the encoded public key in the Self field
 	SecretKey *ecdsa.PrivateKey
 }
+
 type Digest [32]byte
 
 type FullParty interface {
@@ -39,7 +40,7 @@ type FullParty interface {
 	//      or uni-cast requests (which should be encrypted)
 	// signatureOutputChannel: will be used by this Party to output a signature
 	//      which should be aggragated by a relay and constructed into a single ecdsa signature.
-	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature)
+	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error)
 
 	// Stop will Stop the FullPlarty
 	Stop()
@@ -48,9 +49,8 @@ type FullParty interface {
 	AsyncRequestNewSignature(Digest) error
 
 	// Update will Update the FullParty with the ParsedMessage
-	// It will return a boolean indicating if there was an error and an error object containing issues
 	// while running the protocol.
-	Update(tss.ParsedMessage) (noErr bool, err tss.Error)
+	Update(tss.ParsedMessage) error
 }
 
 type Relay interface {
@@ -64,22 +64,22 @@ type KeygenHandler struct {
 	Out               <-chan tss.Message
 	ProtocolEndOutput <-chan *keygen.LocalPartySaveData
 
-	*keygen.LocalPartySaveData
+	SavedData *keygen.LocalPartySaveData
 }
 
-type signer struct {
+type SingleSigner struct {
 	time.Time
-	Signer tss.Party
+	LocalParty tss.Party
 }
 
 type SigningHandler struct {
-	mtx sync.RWMutex
+	Mtx sync.RWMutex
 
-	digestToSigner map[string]signer
+	DigestToSigner map[string]SingleSigner
 
 	// shared by all signers
-	outChan          chan tss.Message
-	sigPartReadyChan chan common.SignatureData
+	OutChan          chan tss.Message
+	SigPartReadyChan chan *common.SignatureData
 }
 
 type Impl struct {
