@@ -1,8 +1,13 @@
 package player
 
 import (
+	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -40,6 +45,9 @@ type SigningHandler struct {
 }
 
 type Impl struct {
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+
 	SecretKey   *ecdsa.PrivateKey
 	PartyID     *tss.PartyID
 	PeerContext *tss.PeerContext
@@ -48,44 +56,41 @@ type Impl struct {
 	KeygenHandler  *KeygenHandler
 	SigningHandler *SigningHandler
 
-	incomingMessagesChannel chan tss.Message
+	incomingMessagesChannel chan tss.ParsedMessage
 
-	IdToPIDmapping map[string]*tss.PartyID
+	IdToPIDmapping         map[string]*tss.PartyID
+	errorChannel           chan<- *tss.Error
+	signatureOutputChannel chan utils.EthContractSignature
 }
 
-func (k *KeygenHandler) setup(outChan tss.Message) {
-	// either create a new localParty, or load from storage
-
-}
-
-func (p *Impl) messageHandler() {
-	// TODO implement me
-}
-
-func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error) {
-	// TODO: spin up msg handlers.
-
-	for i := 0; i < runtime.NumCPU(); i++ {
-		go p.messageHandler()
+func (k *KeygenHandler) setup(outChan chan tss.Message, selfId *tss.PartyID) error {
+	k.Out = outChan
+	content, err := os.ReadFile(k.keysFileName(selfId))
+	if err != nil {
+		return err
 	}
 
-	p.KeygenHandler.setup(outChannel)
-	// TODO implement me
+	if err := json.Unmarshal(content, &k.SavedData); err != nil {
+		return err
+	}
 
-	panic("implement me")
+	// TODO: set up keygen.LocalParty, and run it.
+	return nil
 }
 
-func (p *Impl) Stop() {
-	// TODO implement me
-	panic("implement me")
+func (k *KeygenHandler) keysFileName(selfId *tss.PartyID) string {
+	return path.Join(k.StoragePath, fmt.Sprintf("keygen_data_%d.json", selfId.Index))
 }
 
-func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	// TODO implement me
-	panic("implement me")
-}
+func (k *KeygenHandler) storeKeygenData(toSave *keygen.LocalPartySaveData) error {
+	k.SavedData = toSave
+	content, err := json.Marshal(toSave)
+	if err != nil {
+		return err
+	}
 
-type protocolType int
+	return os.WriteFile(k.keysFileName(k.LocalParty.PartyID()), content, 777)
+}
 
 const (
 	unknownProtocolType protocolType = iota
@@ -93,24 +98,71 @@ const (
 	signingProtocolType
 )
 
-func (p *Impl) Update(message tss.ParsedMessage) error {
-	switch findProtocolType(message) {
-	case keygenProtocolType:
-		return nil
-	case signingProtocolType:
-		return nil
-	default:
-		return errors.New("unknown protocol type")
-	}
-}
-
 func findProtocolType(message tss.ParsedMessage) protocolType {
 	fullMessageStructName := message.Type()
-	if strings.Contains(fullMessageStructName, "keygen") {
+	if strings.Contains(fullMessageStructName, ".keygen.") {
 		return keygenProtocolType
 	}
-	if strings.Contains(fullMessageStructName, "signing") {
+
+	if strings.Contains(fullMessageStructName, ".signing.") {
 		return signingProtocolType
 	}
 	return unknownProtocolType
+}
+
+// The worker serves as messages courier to all "localParty" instances.
+func (p *Impl) worker() {
+	for {
+		select {
+		case message := <-p.incomingMessagesChannel:
+			switch findProtocolType(message) {
+			case keygenProtocolType:
+				fmt.Println("keygen protocol")
+			case signingProtocolType:
+				p.handleIncomingSigningMessage(message)
+			default:
+				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.PartyID, message.GetFrom())
+			}
+		case o := <-p.KeygenHandler.ProtocolEndOutput:
+			if err := p.KeygenHandler.storeKeygenData(o); err != nil {
+				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.PartyID, nil)
+			}
+		case <-p.ctx.Done():
+			return
+		}
+	}
+}
+
+func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan<- *tss.Error) error {
+	p.errorChannel = errChannel
+	p.signatureOutputChannel = signatureOutputChannel
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go p.worker()
+	}
+
+	if err := p.KeygenHandler.setup(outChannel, p.PartyID); err != nil {
+		p.Stop()
+		return fmt.Errorf("keygen handler setup failed: %w", err)
+	}
+
+	return nil
+}
+
+func (p *Impl) Stop() {
+	p.cancelFunc()
+}
+
+func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
+	panic("implement me")
+}
+
+type protocolType int
+
+func (p *Impl) Update(message tss.ParsedMessage) error {
+	return nil
+}
+
+func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
+	panic("implement me")
 }

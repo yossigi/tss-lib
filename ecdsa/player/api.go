@@ -1,10 +1,10 @@
 package player
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"sync"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
 	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
 	"github.com/bnb-chain/tss-lib/v2/tss"
@@ -34,7 +34,7 @@ type FullParty interface {
 	// signatureOutputChannel: will be used by this Party to output a signature
 	//      which should be aggragated by a relay and constructed into a single ecdsa signature.
 	// TODO: add to tss.Message Metadata() function.
-	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error)
+	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan<- *tss.Error)
 
 	// Stop will Stop the FullPlarty
 	Stop()
@@ -47,9 +47,49 @@ type FullParty interface {
 	Update(tss.ParsedMessage) error
 }
 
+type emptyWriter struct{}
+
+func (e emptyWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
 // NewFullPlayer returns a new FullPlayer instance.
-func NewFullParty(parameters *Parameters) FullParty {
-	return newImpl(parameters)
+func NewFullParty(p *Parameters) FullParty {
+	if p == nil {
+		return nil
+	}
+
+	p.ensurePartiesContainsSelf()
+
+	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
+	ctx, cancelF := context.WithCancel(context.Background())
+	imp := &Impl{
+		ctx:         ctx,
+		cancelFunc:  cancelF,
+		SecretKey:   p.SecretKey,
+		PartyID:     p.Self,
+		PeerContext: pctx,
+		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
+		KeygenHandler: &KeygenHandler{
+			StoragePath:       p.SaveDirPath,
+			Out:               nil, // set up during Start()
+			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
+
+			// to be set correctly during Start()
+			LocalParty: nil,
+			SavedData:  nil,
+		},
+		SigningHandler: &SigningHandler{
+			Mtx:              sync.RWMutex{},
+			DigestToSigner:   map[string]SingleSigner{},
+			OutChan:          nil, // set up during Start()
+			SigPartReadyChan: nil, // set up during Start()
+		},
+		incomingMessagesChannel: make(chan tss.ParsedMessage),
+		// TODO: not sure this is needed
+		IdToPIDmapping: map[string]*tss.PartyID{},
+	}
+	return imp
 }
 
 func (p *Parameters) ensurePartiesContainsSelf() {
@@ -60,39 +100,4 @@ func (p *Parameters) ensurePartiesContainsSelf() {
 	}
 
 	p.partyIDs = append(p.partyIDs, p.Self)
-}
-
-func newImpl(p *Parameters) *Impl {
-	if p == nil {
-		return nil
-	}
-
-	p.ensurePartiesContainsSelf()
-
-	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
-	i := &Impl{
-		SecretKey:   p.SecretKey,
-		PartyID:     p.Self,
-		PeerContext: pctx,
-		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
-		KeygenHandler: &KeygenHandler{
-			StoragePath:       p.SaveDirPath,
-			Out:               make(chan tss.Message, len(p.partyIDs)),
-			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
-			// to be set correctly in Start()
-			LocalParty: nil,
-			SavedData:  nil,
-		},
-		SigningHandler: &SigningHandler{
-			Mtx:              sync.RWMutex{},
-			DigestToSigner:   map[string]SingleSigner{},
-			OutChan:          make(chan tss.Message, len(p.partyIDs)),           // TODO: consider best buffer size.
-			SigPartReadyChan: make(chan *common.SignatureData, len(p.partyIDs)), // TODO: consider best buffer size.
-		},
-		incomingMessagesChannel: make(chan tss.Message),
-
-		// TODO: not sure this is needed
-		IdToPIDmapping: map[string]*tss.PartyID{},
-	}
-	return i
 }
