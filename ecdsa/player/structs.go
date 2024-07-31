@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package FullParty
+package player
 
 import (
 	"crypto/ecdsa"
@@ -30,6 +30,7 @@ type Parameters struct {
 	// to the encoded public key in the Self field
 	SecretKey *ecdsa.PrivateKey
 }
+type Digest [32]byte
 
 type FullParty interface {
 	// Start will set up the FullParty, and few sub-components (including few goroutines).
@@ -38,10 +39,13 @@ type FullParty interface {
 	//      or uni-cast requests (which should be encrypted)
 	// signatureOutputChannel: will be used by this Party to output a signature
 	//      which should be aggragated by a relay and constructed into a single ecdsa signature.
-	Start(params Parameters, outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature)
+	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature)
 
 	// Stop will Stop the FullPlarty
 	Stop()
+
+	// AsyncRequestNewSignature begins the signing protocol over the given digest.
+	AsyncRequestNewSignature(Digest) error
 
 	// Update will Update the FullParty with the ParsedMessage
 	// It will return a boolean indicating if there was an error and an error object containing issues
