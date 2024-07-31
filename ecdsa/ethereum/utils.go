@@ -8,10 +8,12 @@ package ethereum
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"math/big"
 
 	"github.com/bnb-chain/tss-lib/v2/crypto"
 	"github.com/ethereum/go-ethereum/common"
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -85,8 +87,21 @@ func EcdsaSignatureToEth(R *crypto.ECPoint, s *big.Int) []byte {
 	return sig
 }
 
-func EcdsaToEthContract(R *crypto.ECPoint, s *big.Int) []byte {
+type EthContractSignature struct {
+	// stored in HEX, with 0x prefix
+	Rx, S, Digest string
+	v             byte
+}
+
+func EcdsaToEthContractSignature(digest []byte, R *crypto.ECPoint, s *big.Int) (EthContractSignature, error) {
+	if len(digest) != 32 {
+		return EthContractSignature{}, errors.New("digest must be 32 bytes")
+	}
 	sig := EcdsaSignatureToEth(R, s)
-	sig[len(sig)-1] += 27
-	return sig
+	return EthContractSignature{
+		Rx:     "0x" + ethcommon.Bytes2Hex(sig[:32]),
+		S:      "0x" + ethcommon.Bytes2Hex(sig[32:64]),
+		Digest: "0x" + ethcommon.Bytes2Hex(digest),
+		v:      sig[len(sig)-1] + 27,
+	}, nil
 }

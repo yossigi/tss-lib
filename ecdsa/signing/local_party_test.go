@@ -143,17 +143,16 @@ signing:
 				assert.NoError(t, err)
 				assert.True(t, bytes.Equal(recoveredKey, utils.EcdsaPublicKeyToBytes(&pk)), "ecrecover must pass")
 
+				ethSig, err := utils.EcdsaToEthContractSignature(digestPadded, R, sumS)
+				assert.NoError(t, err)
+
 				res := struct {
-					RSmall, S, Digest string
-					V                 byte
-					Pk, EthPk         string
+					utils.EthContractSignature
+					Pk, EthPk string
 				}{
-					RSmall: "0x" + ethcommon.Bytes2Hex(sig[:32]),
-					S:      "0x" + ethcommon.Bytes2Hex(sig[32:64]),
-					Digest: "0x" + ethcommon.Bytes2Hex(digestPadded),
-					V:      sig[64] + 27,
-					Pk:     "0x" + ethcommon.Bytes2Hex(utils.EcdsaPublicKeyToBytes(&pk)),
-					EthPk:  "0x" + ethcommon.Bytes2Hex(ethcommon.LeftPadBytes(ethcrypto.Keccak256(utils.EcdsaPublicKeyToBytes(&pk)[1:])[12:], 32)),
+					EthContractSignature: ethSig,
+					Pk:                   "0x" + ethcommon.Bytes2Hex(utils.EcdsaPublicKeyToBytes(&pk)),
+					EthPk:                "0x" + ethcommon.Bytes2Hex(ethcommon.LeftPadBytes(ethcrypto.Keccak256(utils.EcdsaPublicKeyToBytes(&pk)[1:])[12:], 32)),
 				}
 				bts, err := json.MarshalIndent(res, "", "  ")
 				assert.NoError(t, err)
