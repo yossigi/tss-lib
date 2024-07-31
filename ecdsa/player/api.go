@@ -1,15 +1,8 @@
-// Copyright © 2019-2020 Binance
-//
-// This file is part of Binance. The full Binance copyright notice, including
-// terms governing use, modification, and redistribution, is contained in the
-// file LICENSE at the root of the source code distribution tree.
-
 package player
 
 import (
 	"crypto/ecdsa"
 	"sync"
-	"time"
 
 	"github.com/bnb-chain/tss-lib/v2/common"
 	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
@@ -21,14 +14,14 @@ type Parameters struct {
 	// a path in the filesystem where data and files can be saved.
 	SaveDirPath string
 
-	AllPlayers []*tss.PartyID
-	Self       *tss.PartyID
+	partyIDs []*tss.PartyID
+	Self     *tss.PartyID
 
 	Threshold int
 
 	// P2P keys for generating signature all Players should recognise, more formally, this SecretKey should be tied
 	// to the encoded public key in the Self field
-	SecretKey *ecdsa.PrivateKey
+	SecretKey *ecdsa.PrivateKey // TODO: this isn't really needed by this package, but by a reliable broadcast package
 }
 
 type Digest [32]byte
@@ -40,6 +33,7 @@ type FullParty interface {
 	//      or uni-cast requests (which should be encrypted)
 	// signatureOutputChannel: will be used by this Party to output a signature
 	//      which should be aggragated by a relay and constructed into a single ecdsa signature.
+	// TODO: add to tss.Message Metadata() function.
 	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan tss.Error)
 
 	// Stop will Stop the FullPlarty
@@ -53,42 +47,50 @@ type FullParty interface {
 	Update(tss.ParsedMessage) error
 }
 
-type Relay interface {
-	ReconstructSignature(signatureData []*common.SignatureData) (utils.EthContractSignature, error)
+// NewFullPlayer returns a new FullPlayer instance.
+func NewFullParty(parameters *Parameters) FullParty {
+	return newImpl(parameters)
 }
 
-type KeygenHandler struct {
-	LocalParty tss.Party
+func (p *Parameters) ensurePartiesContainsSelf() {
+	for _, party := range p.partyIDs {
+		if party.Id == p.Self.Id {
+			return
+		}
+	}
 
-	// communication channels
-	Out               <-chan tss.Message
-	ProtocolEndOutput <-chan *keygen.LocalPartySaveData
-
-	SavedData *keygen.LocalPartySaveData
+	p.partyIDs = append(p.partyIDs, p.Self)
 }
 
-type SingleSigner struct {
-	time.Time
-	LocalParty tss.Party
-}
+func newImpl(p *Parameters) *Impl {
+	if p == nil {
+		return nil
+	}
 
-type SigningHandler struct {
-	Mtx sync.RWMutex
+	p.ensurePartiesContainsSelf()
 
-	DigestToSigner map[string]SingleSigner
+	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
+	i := &Impl{
+		SecretKey:   p.SecretKey,
+		PartyID:     p.Self,
+		PeerContext: pctx,
+		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
+		KeygenHandler: &KeygenHandler{
+			Out:               make(chan tss.Message, len(p.partyIDs)),
+			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
+			// to be set correctly in Start()
+			LocalParty: nil,
+			SavedData:  nil,
+		},
+		SigningHandler: &SigningHandler{
+			Mtx:              sync.RWMutex{},
+			DigestToSigner:   map[string]SingleSigner{},
+			OutChan:          make(chan tss.Message, len(p.partyIDs)),           // TODO: consider best buffer size.
+			SigPartReadyChan: make(chan *common.SignatureData, len(p.partyIDs)), // TODO: consider best buffer size.
+		},
 
-	// shared by all signers
-	OutChan          chan tss.Message
-	SigPartReadyChan chan *common.SignatureData
-}
-
-type Impl struct {
-	SecretKey      *ecdsa.PrivateKey
-	PartyID        *tss.PartyID
-	PeerContext    *tss.PeerContext
-	Parameters     *tss.Parameters
-	IdToPIDmapping map[string]*tss.PartyID
-
-	KeygenHandler  *KeygenHandler
-	SigningHandler *SigningHandler
+		// TODO: ensure this is needed at all:
+		IdToPIDmapping: map[string]*tss.PartyID{},
+	}
+	return i
 }
