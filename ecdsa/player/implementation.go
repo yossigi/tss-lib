@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/bnb-chain/tss-lib/v2/common"
-	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
 	"github.com/bnb-chain/tss-lib/v2/tss"
 )
@@ -60,11 +59,16 @@ type Impl struct {
 
 	IdToPIDmapping         map[string]*tss.PartyID
 	errorChannel           chan<- *tss.Error
-	signatureOutputChannel chan utils.EthContractSignature
+	signatureOutputChannel chan *common.SignatureData
 }
 
 func (k *KeygenHandler) setup(outChan chan tss.Message, selfId *tss.PartyID) error {
 	k.Out = outChan
+
+	if k.SavedData != nil {
+		return nil
+	}
+
 	content, err := os.ReadFile(k.keysFileName(selfId))
 	if err != nil {
 		return err
@@ -89,7 +93,7 @@ func (k *KeygenHandler) storeKeygenData(toSave *keygen.LocalPartySaveData) error
 		return err
 	}
 
-	return os.WriteFile(k.keysFileName(k.LocalParty.PartyID()), content, 777)
+	return os.WriteFile(k.keysFileName(k.LocalParty.PartyID()), content, 0777)
 }
 
 const (
@@ -133,7 +137,11 @@ func (p *Impl) worker() {
 	}
 }
 
-func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan<- *tss.Error) error {
+func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error {
+	if outChannel == nil || signatureOutputChannel == nil || errChannel == nil {
+		return errors.New("nil channel passed to Start()")
+	}
+
 	p.errorChannel = errChannel
 	p.signatureOutputChannel = signatureOutputChannel
 

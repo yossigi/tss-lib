@@ -5,14 +5,14 @@ import (
 	"crypto/ecdsa"
 	"sync"
 
-	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
+	"github.com/bnb-chain/tss-lib/v2/common"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
 	"github.com/bnb-chain/tss-lib/v2/tss"
 )
 
 type Parameters struct {
-	// a path in the filesystem where data and files can be saved.
-	SaveDirPath string
+	// for simplicity of testing:
+	savedParams *keygen.LocalPartySaveData
 
 	partyIDs []*tss.PartyID
 	Self     *tss.PartyID
@@ -22,6 +22,7 @@ type Parameters struct {
 	// P2P keys for generating signature all Players should recognise, more formally, this SecretKey should be tied
 	// to the encoded public key in the Self field
 	SecretKey *ecdsa.PrivateKey // TODO: this isn't really needed by this package, but by a reliable broadcast package
+	WorkDir   string
 }
 
 type Digest [32]byte
@@ -34,7 +35,7 @@ type FullParty interface {
 	// should be encrypted) signatureOutputChannel: will be used by this Party
 	// to output a signature which should be aggragated by a relay and
 	// constructed into a single ecdsa signature.
-	Start(outChannel chan tss.Message, signatureOutputChannel chan utils.EthContractSignature, errChannel chan<- *tss.Error) error
+	Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error
 
 	// Stop will Stop the FullPlarty
 	Stop()
@@ -45,12 +46,6 @@ type FullParty interface {
 	// Update will Update the FullParty with the ParsedMessage
 	// while running the protocol.
 	Update(tss.ParsedMessage) error
-}
-
-type emptyWriter struct{}
-
-func (e emptyWriter) Write(p []byte) (n int, err error) {
-	return len(p), nil
 }
 
 // NewFullPlayer returns a new FullPlayer instance.
@@ -71,13 +66,13 @@ func NewFullParty(p *Parameters) FullParty {
 		PeerContext: pctx,
 		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
 		KeygenHandler: &KeygenHandler{
-			StoragePath:       p.SaveDirPath,
+			StoragePath:       p.WorkDir,
 			Out:               nil, // set up during Start()
 			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
 
 			// to be set correctly during Start()
 			LocalParty: nil,
-			SavedData:  nil,
+			SavedData:  p.savedParams,
 		},
 		SigningHandler: &SigningHandler{
 			Mtx:              sync.RWMutex{},
