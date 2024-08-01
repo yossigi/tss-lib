@@ -76,7 +76,7 @@ func NewFullParty(p *Parameters) FullParty {
 			SavedData:  p.savedParams,
 		},
 		SigningHandler: &SigningHandler{
-			Mtx:              sync.RWMutex{},
+			Mtx:              sync.Mutex{},
 			DigestToSigner:   map[string]*SingleSigner{},
 			SigPartReadyChan: nil, // set up during Start()
 		},

@@ -10,7 +10,7 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
@@ -30,16 +30,56 @@ type KeygenHandler struct {
 }
 
 type SingleSigner struct {
+	// Time represents the time when the first message was received.
+	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
 	time.Time
+
+	// used as buffer for messages received before starting signing.
+	// will be consumed once signing starts.
+	MessageBuffer []tss.ParsedMessage
+
+	// nil if not started signing yet.
+	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
+	// and used.
 	LocalParty tss.Party
 }
 
+func (s *SingleSigner) sortMessageBuffer() {
+	sort.Slice(s.MessageBuffer, func(i, j int) bool {
+		return findRound(s.MessageBuffer[i]) < findRound(s.MessageBuffer[j])
+	})
+}
+
 type SigningHandler struct {
-	Mtx sync.RWMutex
+	Mtx sync.Mutex
 
 	DigestToSigner map[string]*SingleSigner
 
 	SigPartReadyChan chan *common.SignatureData
+}
+
+func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) *SingleSigner {
+	s.Mtx.Lock()
+	defer s.Mtx.Unlock()
+
+	signer, ok := s.DigestToSigner[string(message.WireMsg().GetDigest())]
+	if !ok {
+
+		s.DigestToSigner[string(message.WireMsg().GetDigest())] = &SingleSigner{
+			Time:          time.Now(),
+			LocalParty:    nil,
+			MessageBuffer: []tss.ParsedMessage{message},
+		}
+		return nil
+	}
+
+	// haven't been requested to sign this digest yet.
+	if signer.LocalParty == nil {
+		s.DigestToSigner[string(message.WireMsg().GetDigest())].MessageBuffer = append(signer.MessageBuffer, message)
+		return nil
+	}
+
+	return signer
 }
 
 type Impl struct {
@@ -115,24 +155,6 @@ func (k *KeygenHandler) getSavedParams() *keygen.LocalPartySaveData {
 	return k.SavedData
 }
 
-const (
-	unknownProtocolType protocolType = iota
-	keygenProtocolType
-	signingProtocolType
-)
-
-func findProtocolType(message tss.ParsedMessage) protocolType {
-	fullMessageStructName := message.Type()
-	if strings.Contains(fullMessageStructName, ".keygen.") {
-		return keygenProtocolType
-	}
-
-	if strings.Contains(fullMessageStructName, ".signing.") {
-		return signingProtocolType
-	}
-	return unknownProtocolType
-}
-
 // The worker serves as messages courier to all "localParty" instances.
 func (p *Impl) worker() {
 	for {
@@ -187,42 +209,83 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 		return errors.New("no keygen data to sign with")
 	}
 
+	signer, err := p.getOrCreateSingleSigner(digest, secrets)
+	if err != nil {
+		return err
+	}
+
+	if len(signer.MessageBuffer) > 0 {
+		signer.sortMessageBuffer()
+
+		for _, message := range signer.MessageBuffer {
+			ok, err := signer.LocalParty.Update(message)
+			if !ok {
+				p.reportError(err)
+			}
+		}
+
+		signer.MessageBuffer = nil
+	}
+
+	return nil
+}
+
+func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*SingleSigner, error) {
 	// TODO: discuss faster setup with Yossi.
 	p.SigningHandler.Mtx.Lock()
 	defer p.SigningHandler.Mtx.Unlock()
 
-	if _, ok := p.SigningHandler.DigestToSigner[string(digest[:])]; ok {
-		return errors.New("already signed this digest")
+	signer, ok := p.SigningHandler.DigestToSigner[string(digest[:])]
+	if !ok {
+		signer = &SingleSigner{Time: time.Now()}
+		p.SigningHandler.DigestToSigner[string(digest[:])] = signer
 	}
 
-	singleSigner := &SingleSigner{
-		Time: time.Now(),
-		LocalParty: signing.NewLocalParty(
+	if signer.LocalParty == nil {
+		signer.LocalParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
 			p.Parameters,
 			*secrets,
 			p.OutChan,
-			p.signatureOutputChannel, // TODO: consider using a new channel for each signer.
-		),
-	}
-	if err := singleSigner.LocalParty.Start(); err != nil {
-		return err
+			p.signatureOutputChannel,
+		)
+
+		if err := signer.LocalParty.Start(); err != nil {
+			return nil, err
+		}
 	}
 
-	p.SigningHandler.DigestToSigner[string(digest[:])] = singleSigner
-	return nil
+	return signer, nil
 }
 
-type protocolType int
-
 func (p *Impl) Update(message tss.ParsedMessage) error {
-	tmp := message.WireMsg().GetDigest()
-	_ = tmp
-	// [41 191 112 33 2 14 168 157 189 145 239 82 2 43 90 101 75 85 237 65 140 158 122 186 113 239 59 67 165 22 105 242]
-	panic("implement me")
-	return nil
+	select {
+	case p.incomingMessagesChannel <- message:
+		return nil
+	case <-p.ctx.Done():
+		return errors.New("worker stopped")
+	}
 }
 
 func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
-	panic("implement me")
+	signer := p.SigningHandler.getSignerOrCacheMessage(message)
+	if signer == nil {
+		// (SAFETY) To ensure messages aren't signed blindly because some rouge
+		// player started signing without a valid reason, this player will only sign if it knows of the digest.
+		return
+	}
+
+	ok, err := signer.LocalParty.Update(message)
+	if !ok {
+		p.reportError(err)
+	}
+}
+
+func (p *Impl) reportError(newError *tss.Error) {
+	select {
+	case p.errorChannel <- newError:
+	case <-p.ctx.Done():
+	default:
+		// no one is waiting on error reporting channel/ no buffer.
+	}
 }

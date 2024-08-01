@@ -2,7 +2,6 @@ package player
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"fmt"
 	"math/big"
 	"testing"
@@ -19,10 +18,16 @@ import (
 func TestSign(t *testing.T) {
 	a := assert.New(t)
 
-	parties, params := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
-	pk := params[0].savedParams.ECDSAPub
+	<-SingleSignatureTestHelper(a, parties)
 
+	for _, party := range parties {
+		party.Stop()
+	}
+}
+
+func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan struct{} {
 	outchan := make(chan tss.Message, len(parties)*20)
 	sigchan := make(chan *common.SignatureData, test.TestParticipants)
 	errchan := make(chan *tss.Error, 1)
@@ -30,29 +35,8 @@ func TestSign(t *testing.T) {
 		a.NoError(p.Start(outchan, sigchan, errchan))
 	}
 
-	<-SingleSignatureTestHelper(a, parties, outchan, errchan, sigchan)
-
-	p := parties[0]
-	d := Digest{} // assuming this is the hash digest of some message
-	_, _ = rand.Read(d[:])
-
-	a.NoError(p.AsyncRequestNewSignature(d))
-
-	sig := <-sigchan
-	a.Equal(d[:], sig.M[:])
-
-	a.True(ecdsa.Verify(pk.ToECDSAPubKey(), sig.M, (&big.Int{}).SetBytes(sig.R), (&big.Int{}).SetBytes(sig.S)))
-	for _, party := range parties {
-		party.Stop()
-	}
-}
-
-func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty, outchan chan tss.Message, errchan chan *tss.Error, sigchan chan *common.SignatureData) chan struct{} {
-	donechan := make(chan struct{})
-	defer close(donechan)
-
+	// setup:
 	d := crypto.Keccak256([]byte("hello, world"))
-	fmt.Println(d)
 	hash := Digest{}
 	copy(hash[:], d)
 
@@ -61,13 +45,37 @@ func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty, outcha
 		idToFullParty[p.(*Impl).PartyID.Id] = p
 	}
 
+	// network simulation:
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		networkSimulator(a, errchan, outchan, sigchan, idToFullParty, hash)
+	}()
+
 	// setting a single message to sign for all players.
+	for _, party := range parties {
+		a.NoError(party.AsyncRequestNewSignature(hash))
+	}
 
-	a.NoError(parties[0].AsyncRequestNewSignature(hash))
+	return donechan
+}
 
-signerLoop:
+func networkSimulator(
+	a *assert.Assertions,
+	errchan chan *tss.Error,
+	outchan chan tss.Message,
+	sigchan chan *common.SignatureData,
+	idToFullParty map[string]FullParty,
+	hash Digest) {
+
+	var anyParty FullParty
+	for _, p := range idToFullParty {
+		anyParty = p
+		break
+	}
+	a.NotNil(anyParty)
+
 	for {
-
 		select {
 		case err := <-errchan:
 			a.NoError(err)
@@ -79,17 +87,14 @@ signerLoop:
 
 		// the following happens locally on each player. we simulate what each player will do after it's done with DKG
 		case m := <-sigchan:
-			fmt.Println("Signature ready", m)
-
-			validateSignature(a, parties[0].getPublic(), m, hash[:])
-			break signerLoop
+			validateSignature(a, anyParty.getPublic(), m, hash[:])
+			fmt.Println("Signature validated correctly. ", m)
+			return
 
 		case <-time.Tick(time.Millisecond * 500):
 			fmt.Println("ticked")
 		}
 	}
-
-	return donechan
 }
 
 func validateSignature(a *assert.Assertions, pk *ecdsa.PublicKey, m *common.SignatureData, msgToSign []byte) {
@@ -102,7 +107,6 @@ func validateSignature(a *assert.Assertions, pk *ecdsa.PublicKey, m *common.Sign
 }
 
 func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty) {
-	fmt.Println(newMsg.Type())
 	bz, routing, err := newMsg.WireBytes()
 	a.NoError(err)
 	// parsedMsg doesn't contain routing, since it assumes this message arrive for this participant from outside.
