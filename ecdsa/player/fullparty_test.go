@@ -27,29 +27,54 @@ func TestSign(t *testing.T) {
 	}
 }
 
-func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan struct{} {
-	outchan := make(chan tss.Message, len(parties)*20)
-	sigchan := make(chan *common.SignatureData, test.TestParticipants)
-	errchan := make(chan *tss.Error, 1)
-	for _, p := range parties {
-		a.NoError(p.Start(outchan, sigchan, errchan))
-	}
+type networkSimulator struct {
+	outchan         chan tss.Message
+	sigchan         chan *common.SignatureData
+	errchan         chan *tss.Error
+	idToFullParty   map[string]FullParty
+	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
 
-	// setup:
+	Timeout time.Duration // 0 means no timeout
+}
+
+func (n *networkSimulator) verifiedAllSignatures() bool {
+	for _, b := range n.digestsToVerify {
+		if b {
+			continue
+		}
+		return false
+	}
+	return true
+
+}
+
+func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan struct{} {
+	digestSet := make(map[Digest]bool)
 	d := crypto.Keccak256([]byte("hello, world"))
 	hash := Digest{}
 	copy(hash[:], d)
+	digestSet[hash] = false
 
-	idToFullParty := map[string]FullParty{}
-	for _, p := range parties {
-		idToFullParty[p.(*Impl).PartyID.Id] = p
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20,
 	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	// setup:
 
 	// network simulation:
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)
-		networkSimulator(a, errchan, outchan, sigchan, idToFullParty, hash)
+		n.run(a)
 	}()
 
 	// setting a single message to sign for all players.
@@ -60,50 +85,67 @@ func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan s
 	return donechan
 }
 
-func networkSimulator(
-	a *assert.Assertions,
-	errchan chan *tss.Error,
-	outchan chan tss.Message,
-	sigchan chan *common.SignatureData,
-	idToFullParty map[string]FullParty,
-	hash Digest) {
+func idToParty(parties []FullParty) map[string]FullParty {
+	idToFullParty := map[string]FullParty{}
+	for _, p := range parties {
+		idToFullParty[p.(*Impl).PartyID.Id] = p
+	}
+	return idToFullParty
+}
+
+func (n *networkSimulator) run(a *assert.Assertions) {
 
 	var anyParty FullParty
-	for _, p := range idToFullParty {
+	for _, p := range n.idToFullParty {
 		anyParty = p
 		break
 	}
 	a.NotNil(anyParty)
 
+	after := time.After(n.Timeout)
+	if n.Timeout == 0 {
+		after = nil
+	}
+
 	for {
 		select {
-		case err := <-errchan:
+		case err := <-n.errchan:
 			a.NoError(err)
 			a.FailNow("unexpected error")
 
 		// simulating the network:
-		case newMsg := <-outchan:
-			passMsg(a, newMsg, idToFullParty)
+		case newMsg := <-n.outchan:
+			passMsg(a, newMsg, n.idToFullParty)
 
 		// the following happens locally on each player. we simulate what each player will do after it's done with DKG
-		case m := <-sigchan:
-			validateSignature(a, anyParty.getPublic(), m, hash[:])
-			fmt.Println("Signature validated correctly. ", m)
-			return
+		case m := <-n.sigchan:
+			d := Digest{}
+			copy(d[:], m.M)
+			verified, ok := n.digestsToVerify[d]
+			a.True(ok)
 
-		case <-time.Tick(time.Millisecond * 500):
-			fmt.Println("ticked")
+			if !verified {
+				a.True(validateSignature(anyParty.getPublic(), m, m.M))
+				n.digestsToVerify[d] = true
+				fmt.Println("Signature validated correctly.", m)
+				continue
+			}
+
+			if n.verifiedAllSignatures() {
+				fmt.Println("All signatures validated correctly.")
+				return
+			}
+		case <-after:
 		}
 	}
 }
 
-func validateSignature(a *assert.Assertions, pk *ecdsa.PublicKey, m *common.SignatureData, msgToSign []byte) {
-	digest := m.M
-	a.Equal(digest, msgToSign)
+func validateSignature(pk *ecdsa.PublicKey, m *common.SignatureData, digest []byte) bool {
 	S := (&big.Int{}).SetBytes(m.S)
 	r := (&big.Int{}).SetBytes(m.R)
 
-	a.True(ecdsa.Verify(pk, digest, r, S))
+	return ecdsa.Verify(pk, digest, r, S)
+
 }
 
 func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty) {
