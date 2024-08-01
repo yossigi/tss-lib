@@ -139,10 +139,16 @@ func (mm *MessageImpl) IsToOldAndNewCommittees() bool {
 }
 
 func (mm *MessageImpl) WireBytes() ([]byte, *MessageRouting, error) {
-
+	tmp1 := mm.wire.To
+	tmp2 := mm.wire.From
+	defer func() {
+		mm.wire.To = tmp1
+		mm.wire.From = tmp2
+	}()
 	// reducing space on wire.
 	mm.wire.To = nil
 	mm.wire.From = nil
+
 	bz, err := proto.Marshal(mm.wire)
 	if err != nil {
 		return nil, nil, err
