@@ -1,4 +1,4 @@
-package player
+package party
 
 import (
 	"context"
@@ -50,7 +50,7 @@ type FullParty interface {
 	getPublic() *ecdsa.PublicKey
 }
 
-// NewFullPlayer returns a new FullPlayer instance.
+// NewFullParty returns a new FullParty instance.
 func NewFullParty(p *Parameters) FullParty {
 	if p == nil {
 		return nil

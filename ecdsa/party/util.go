@@ -1,4 +1,4 @@
-package player
+package party
 
 import (
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"

@@ -1,4 +1,4 @@
-package player
+package party
 
 import (
 	"crypto/ecdsa"
@@ -77,7 +77,7 @@ func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan s
 		n.run(a)
 	}()
 
-	// setting a single message to sign for all players.
+	// setting a single message to sign for all parties.
 	for _, party := range parties {
 		a.NoError(party.AsyncRequestNewSignature(hash))
 	}
@@ -117,7 +117,6 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 		case newMsg := <-n.outchan:
 			passMsg(a, newMsg, n.idToFullParty)
 
-		// the following happens locally on each player. we simulate what each player will do after it's done with DKG
 		case m := <-n.sigchan:
 			d := Digest{}
 			copy(d[:], m.M)
@@ -135,6 +134,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 				fmt.Println("All signatures validated correctly.")
 				return
 			}
+
 		case <-after:
 		}
 	}

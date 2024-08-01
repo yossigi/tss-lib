@@ -1,4 +1,4 @@
-package player
+package party
 
 import (
 	"context"
@@ -271,7 +271,7 @@ func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
 	signer := p.SigningHandler.getSignerOrCacheMessage(message)
 	if signer == nil {
 		// (SAFETY) To ensure messages aren't signed blindly because some rouge
-		// player started signing without a valid reason, this player will only sign if it knows of the digest.
+		// Party started signing without a valid reason, this Party will only sign if it knows of the digest.
 		return
 	}
 
