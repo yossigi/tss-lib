@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"strconv"
 	"testing"
 	"time"
 
@@ -61,7 +62,6 @@ func TestSignOnce(t *testing.T) {
 Test to ensure that a Part will not attempt to sign a digest, even if received messages to sign from others.
 */
 func TestPartyDoesntFollowRouge(t *testing.T) {
-
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
@@ -171,7 +171,49 @@ func TestLateParties(t *testing.T) {
 }
 
 func TestSimultaniouslySigning(t *testing.T) {
-	t.FailNow()
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	digestSet := make(map[Digest]bool)
+	for i := 0; i < 5; i++ {
+		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		hash := Digest{}
+		copy(hash[:], d)
+		digestSet[hash] = false
+	}
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	for digest := range digestSet {
+		for _, party := range parties {
+			a.NoError(party.AsyncRequestNewSignature(digest))
+		}
+	}
+
+	<-donechan
+	a.True(n.verifiedAllSignatures())
+
+	for _, party := range parties {
+		party.Stop()
+	}
 }
 
 type networkSimulator struct {
