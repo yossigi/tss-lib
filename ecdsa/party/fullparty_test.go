@@ -15,16 +15,101 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSign(t *testing.T) {
+func TestSignOnce(t *testing.T) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
-	<-SingleSignatureTestHelper(a, parties)
+	digestSet := make(map[Digest]bool)
+	d := crypto.Keccak256([]byte("hello, world"))
+	hash := Digest{}
+	copy(hash[:], d)
+	digestSet[hash] = false
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20,
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	for _, party := range parties {
+		a.NoError(party.AsyncRequestNewSignature(hash))
+	}
+
+	<-donechan
 
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+/*
+Test to ensure that a Part will not attempt to sign a digest, even if received messages to sign from others.
+*/
+func TestPartyDoesntFollowRouge(t *testing.T) {
+
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	digestSet := make(map[Digest]bool)
+	d := crypto.Keccak256([]byte("hello, world"))
+	hash := Digest{}
+	copy(hash[:], d)
+	digestSet[hash] = false
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 3,
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	for i := 0; i < len(parties)-2; i++ {
+		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+	}
+
+	<-donechan
+	impl := parties[len(parties)-1].(*Impl)
+
+	// test:
+	impl.SigningHandler.Mtx.Lock()
+	singleSigner, ok := impl.SigningHandler.DigestToSigner[string(hash[:])]
+	a.True(ok)
+	// unless request to sign something, LocalParty should remain nil.
+	a.Nil(singleSigner.LocalParty)
+	a.GreaterOrEqual(len(singleSigner.MessageBuffer), 1) // ensures this party received at least one message from others
+	parties[len(parties)-1].(*Impl).SigningHandler.Mtx.Unlock()
+
+	for _, party := range parties {
+		party.Stop()
+	}
+
 }
 
 type networkSimulator struct {
@@ -46,43 +131,6 @@ func (n *networkSimulator) verifiedAllSignatures() bool {
 	}
 	return true
 
-}
-
-func SingleSignatureTestHelper(a *assert.Assertions, parties []FullParty) chan struct{} {
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
-
-	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *tss.Error, 1),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20,
-	}
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
-	}
-
-	// setup:
-
-	// network simulation:
-	donechan := make(chan struct{})
-	go func() {
-		defer close(donechan)
-		n.run(a)
-	}()
-
-	// setting a single message to sign for all parties.
-	for _, party := range parties {
-		a.NoError(party.AsyncRequestNewSignature(hash))
-	}
-
-	return donechan
 }
 
 func idToParty(parties []FullParty) map[string]FullParty {
@@ -136,6 +184,8 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 			}
 
 		case <-after:
+			fmt.Println("network timeout")
+			return
 		}
 	}
 }
