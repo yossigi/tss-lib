@@ -46,6 +46,8 @@ type FullParty interface {
 	// Update will Update the FullParty with the ParsedMessage
 	// while running the protocol.
 	Update(tss.ParsedMessage) error
+
+	getPublic() *ecdsa.PublicKey
 }
 
 // NewFullPlayer returns a new FullPlayer instance.
@@ -67,7 +69,6 @@ func NewFullParty(p *Parameters) FullParty {
 		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
 		KeygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
-			Out:               nil, // set up during Start()
 			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
 
 			// to be set correctly during Start()
@@ -76,13 +77,17 @@ func NewFullParty(p *Parameters) FullParty {
 		},
 		SigningHandler: &SigningHandler{
 			Mtx:              sync.RWMutex{},
-			DigestToSigner:   map[string]SingleSigner{},
-			OutChan:          nil, // set up during Start()
+			DigestToSigner:   map[string]*SingleSigner{},
 			SigPartReadyChan: nil, // set up during Start()
 		},
 		incomingMessagesChannel: make(chan tss.ParsedMessage),
 		// TODO: not sure this is needed
 		IdToPIDmapping: map[string]*tss.PartyID{},
+
+		// the following fields should be provided in Start()
+		errorChannel:           nil,
+		OutChan:                nil,
+		signatureOutputChannel: nil,
 	}
 	return imp
 }

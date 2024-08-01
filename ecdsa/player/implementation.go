@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bnb-chain/tss-lib/v2/common"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
+	"github.com/bnb-chain/tss-lib/v2/ecdsa/signing"
 	"github.com/bnb-chain/tss-lib/v2/tss"
 )
 
@@ -22,7 +24,6 @@ type KeygenHandler struct {
 	LocalParty  tss.Party
 	StoragePath string
 	// communication channels
-	Out               <-chan tss.Message
 	ProtocolEndOutput <-chan *keygen.LocalPartySaveData
 
 	SavedData *keygen.LocalPartySaveData
@@ -36,10 +37,8 @@ type SingleSigner struct {
 type SigningHandler struct {
 	Mtx sync.RWMutex
 
-	DigestToSigner map[string]SingleSigner
+	DigestToSigner map[string]*SingleSigner
 
-	// shared by all signers
-	OutChan          chan tss.Message
 	SigPartReadyChan chan *common.SignatureData
 }
 
@@ -59,11 +58,27 @@ type Impl struct {
 
 	IdToPIDmapping         map[string]*tss.PartyID
 	errorChannel           chan<- *tss.Error
+	OutChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
 }
 
+func (p *Impl) getPublic() *ecdsa.PublicKey {
+	if p.KeygenHandler == nil {
+		return nil
+	}
+	if p.KeygenHandler.SavedData == nil {
+		return nil
+	}
+
+	if p.KeygenHandler.SavedData.ECDSAPub == nil {
+		return nil
+	}
+
+	return p.KeygenHandler.SavedData.ECDSAPub.ToECDSAPubKey()
+}
+
 func (k *KeygenHandler) setup(outChan chan tss.Message, selfId *tss.PartyID) error {
-	k.Out = outChan
+	_ = outChan
 
 	if k.SavedData != nil {
 		return nil
@@ -94,6 +109,10 @@ func (k *KeygenHandler) storeKeygenData(toSave *keygen.LocalPartySaveData) error
 	}
 
 	return os.WriteFile(k.keysFileName(k.LocalParty.PartyID()), content, 0777)
+}
+
+func (k *KeygenHandler) getSavedParams() *keygen.LocalPartySaveData {
+	return k.SavedData
 }
 
 const (
@@ -144,6 +163,7 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 
 	p.errorChannel = errChannel
 	p.signatureOutputChannel = signatureOutputChannel
+	p.OutChan = outChannel
 
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go p.worker()
@@ -162,12 +182,44 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	panic("implement me")
+	secrets := p.KeygenHandler.getSavedParams()
+	if secrets == nil {
+		return errors.New("no keygen data to sign with")
+	}
+
+	// TODO: discuss faster setup with Yossi.
+	p.SigningHandler.Mtx.Lock()
+	defer p.SigningHandler.Mtx.Unlock()
+
+	if _, ok := p.SigningHandler.DigestToSigner[string(digest[:])]; ok {
+		return errors.New("already signed this digest")
+	}
+
+	singleSigner := &SingleSigner{
+		Time: time.Now(),
+		LocalParty: signing.NewLocalParty(
+			(&big.Int{}).SetBytes(digest[:]),
+			p.Parameters,
+			*secrets,
+			p.OutChan,
+			p.signatureOutputChannel, // TODO: consider using a new channel for each signer.
+		),
+	}
+	if err := singleSigner.LocalParty.Start(); err != nil {
+		return err
+	}
+
+	p.SigningHandler.DigestToSigner[string(digest[:])] = singleSigner
+	return nil
 }
 
 type protocolType int
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
+	tmp := message.WireMsg().GetDigest()
+	_ = tmp
+	// [41 191 112 33 2 14 168 157 189 145 239 82 2 43 90 101 75 85 237 65 140 158 122 186 113 239 59 67 165 22 105 242]
+	panic("implement me")
 	return nil
 }
 
