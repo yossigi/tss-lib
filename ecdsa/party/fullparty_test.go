@@ -170,7 +170,7 @@ func TestLateParties(t *testing.T) {
 
 }
 
-func TestSimultaniouslySigning(t *testing.T) {
+func TestSimultaneouslySigning(t *testing.T) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
