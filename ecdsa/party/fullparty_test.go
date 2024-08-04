@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -16,16 +17,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSignOnce(t *testing.T) {
+func TestSigning(t *testing.T) {
+	t.Run("single signature", func(t *testing.T) { testSigning(t, 1) })
+	t.Run("five signatures ", func(t *testing.T) { testSigning(t, 5) })
+}
+
+func testSigning(t *testing.T, numSignatures int) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
 	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	for i := 0; i < numSignatures; i++ {
+		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		hash := Digest{}
+		copy(hash[:], d)
+		digestSet[hash] = false
+	}
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -33,7 +41,7 @@ func TestSignOnce(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20,
+		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
@@ -46,10 +54,13 @@ func TestSignOnce(t *testing.T) {
 		n.run(a)
 	}()
 
-	for _, party := range parties {
-		a.NoError(party.AsyncRequestNewSignature(hash))
+	for digest := range digestSet {
+		for _, party := range parties {
+			a.NoError(party.AsyncRequestNewSignature(digest))
+		}
 	}
 
+	fmt.Println("ngoroutines:", runtime.NumGoroutine())
 	<-donechan
 	a.True(n.verifiedAllSignatures())
 
@@ -91,7 +102,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		n.run(a)
 	}()
 
-	for i := 0; i < len(parties)-2; i++ {
+	for i := 0; i < len(parties)-1; i++ {
 		a.NoError(parties[i].AsyncRequestNewSignature(hash))
 	}
 
@@ -114,6 +125,11 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 }
 
 func TestLateParties(t *testing.T) {
+	t.Run("single late party", func(t *testing.T) { testLateParties(t, 1) })
+	t.Run("multiple late parties", func(t *testing.T) { testLateParties(t, 5) })
+}
+
+func testLateParties(t *testing.T, numLate int) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
@@ -143,14 +159,14 @@ func TestLateParties(t *testing.T) {
 		n.run(a)
 	}()
 
-	for i := 0; i < len(parties)-5; i++ {
+	for i := 0; i < len(parties)-numLate; i++ {
 		a.NoError(parties[i].AsyncRequestNewSignature(hash))
 	}
 
 	<-donechan
 	a.False(n.verifiedAllSignatures())
 
-	for i := len(parties) - 5; i < len(parties); i++ {
+	for i := len(parties) - numLate; i < len(parties); i++ {
 		a.NoError(parties[i].AsyncRequestNewSignature(hash))
 	}
 
@@ -162,53 +178,6 @@ func TestLateParties(t *testing.T) {
 	}()
 
 	<-donechan2
-	a.True(n.verifiedAllSignatures())
-
-	for _, party := range parties {
-		party.Stop()
-	}
-
-}
-
-func TestSimultaneouslySigning(t *testing.T) {
-	a := assert.New(t)
-
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
-
-	digestSet := make(map[Digest]bool)
-	for i := 0; i < 5; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
-		hash := Digest{}
-		copy(hash[:], d)
-		digestSet[hash] = false
-	}
-
-	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *tss.Error, 1),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
-	}
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
-	}
-
-	donechan := make(chan struct{})
-	go func() {
-		defer close(donechan)
-		n.run(a)
-	}()
-
-	for digest := range digestSet {
-		for _, party := range parties {
-			a.NoError(party.AsyncRequestNewSignature(digest))
-		}
-	}
-
-	<-donechan
 	a.True(n.verifiedAllSignatures())
 
 	for _, party := range parties {
