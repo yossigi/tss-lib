@@ -45,9 +45,9 @@ type SingleSigner struct {
 	sync.Once
 }
 
-func (s *SingleSigner) sortMessageBuffer() {
-	sort.Slice(s.MessageBuffer, func(i, j int) bool {
-		return findRound(s.MessageBuffer[i]) < findRound(s.MessageBuffer[j])
+func (signer *SingleSigner) sortMessageBuffer() {
+	sort.Slice(signer.MessageBuffer, func(i, j int) bool {
+		return findRound(signer.MessageBuffer[i]) < findRound(signer.MessageBuffer[j])
 	})
 }
 
@@ -240,9 +240,11 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 		return errors.New("no keygen data to sign with")
 	}
 
-	signer, err := p.getOrCreateSingleSigner(digest, secrets)
-	if err != nil {
-		return err
+	signer := p.getOrCreateSingleSigner(digest, secrets)
+
+	e := signer.ensureStarted()
+	if e != nil && e.Cause() != nil {
+		return e
 	}
 
 	if len(signer.MessageBuffer) > 0 {
@@ -261,8 +263,15 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	return nil
 }
 
-func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*SingleSigner, error) {
-	// TODO: discuss faster setup with Yossi.
+func (signer *SingleSigner) ensureStarted() *tss.Error {
+	var e *tss.Error
+	signer.Once.Do(func() {
+		e = signer.LocalParty.Start()
+	})
+	return e
+}
+
+func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) *SingleSigner {
 	p.SigningHandler.Mtx.Lock()
 	defer p.SigningHandler.Mtx.Unlock()
 
@@ -280,13 +289,9 @@ func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalParty
 			p.OutChan,
 			p.signatureOutputChannel,
 		)
-		// TODO: use Once to ensure this happens once and outside of lock!
-		if err := signer.LocalParty.Start(); err != nil {
-			return nil, err
-		}
 	}
 
-	return signer, nil
+	return signer
 }
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
@@ -303,6 +308,11 @@ func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
 	if signer == nil {
 		// (SAFETY) To ensure messages aren't signed blindly because some rouge
 		// Party started signing without a valid reason, this Party will only sign if it knows of the digest.
+		return
+	}
+
+	if err := signer.ensureStarted(); err != nil {
+		p.reportError(err)
 		return
 	}
 
