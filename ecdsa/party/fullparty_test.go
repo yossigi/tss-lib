@@ -55,10 +55,14 @@ func testSigning(t *testing.T, numSignatures int) {
 	}()
 
 	for digest := range digestSet {
-		for _, party := range parties {
-			a.NoError(party.AsyncRequestNewSignature(digest))
-		}
+		go func(digest Digest) {
+			for _, party := range parties {
+				a.NoError(party.AsyncRequestNewSignature(digest))
+			}
+		}(digest)
 	}
+
+	fmt.Println("Setup done. test starting.")
 
 	fmt.Println("ngoroutines:", runtime.NumGoroutine())
 	<-donechan
