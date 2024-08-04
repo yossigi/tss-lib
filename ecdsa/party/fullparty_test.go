@@ -36,7 +36,7 @@ func testSigning(t *testing.T, numSignatures int) {
 	}
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
+		outchan:         make(chan tss.Message, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),

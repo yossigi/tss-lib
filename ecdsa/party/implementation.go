@@ -59,9 +59,8 @@ type SigningHandler struct {
 	SigPartReadyChan chan *common.SignatureData
 }
 
-func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) *SingleSigner {
+func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*SingleSigner, *tss.Error) {
 	s.Mtx.Lock()
-	defer s.Mtx.Unlock()
 
 	signer, ok := s.DigestToSigner[string(message.WireMsg().GetDigest())]
 	if !ok {
@@ -71,16 +70,31 @@ func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) *Sin
 			LocalParty:    nil,
 			MessageBuffer: []tss.ParsedMessage{message},
 		}
-		return nil
+
+		s.Mtx.Unlock()
+
+		return nil, nil
 	}
 
 	// haven't been requested to sign this digest yet.
 	if signer.LocalParty == nil {
 		s.DigestToSigner[string(message.WireMsg().GetDigest())].MessageBuffer = append(signer.MessageBuffer, message)
-		return nil
+
+		s.Mtx.Unlock()
+
+		return nil, nil
 	}
 
-	return signer
+	s.Mtx.Unlock()
+
+	var e *tss.Error
+	signer.Once.Do(func() { e = signer.LocalParty.Start() })
+
+	if e != nil && e.Cause() != nil {
+		return nil, e
+	}
+
+	return signer, nil
 }
 
 type Impl struct {
@@ -264,7 +278,6 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*SingleSigner, error) {
 	// TODO: discuss faster setup with Yossi.
 	p.SigningHandler.Mtx.Lock()
-	defer p.SigningHandler.Mtx.Unlock()
 
 	signer, ok := p.SigningHandler.DigestToSigner[string(digest[:])]
 	if !ok {
@@ -281,12 +294,18 @@ func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalParty
 			p.signatureOutputChannel,
 		)
 		// TODO: use Once to ensure this happens once and outside of lock!
-		if err := signer.LocalParty.Start(); err != nil {
-			return nil, err
-		}
 	}
 
-	return signer, nil
+	p.SigningHandler.Mtx.Unlock()
+
+	var e error
+	signer.Once.Do(func() {
+		if err := signer.LocalParty.Start(); err != nil {
+			e = err
+		}
+	})
+
+	return signer, e
 }
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
@@ -299,7 +318,12 @@ func (p *Impl) Update(message tss.ParsedMessage) error {
 }
 
 func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
-	signer := p.SigningHandler.getSignerOrCacheMessage(message)
+	signer, err := p.SigningHandler.getSignerOrCacheMessage(message)
+	if err != nil {
+		p.reportError(err)
+		return
+	}
+
 	if signer == nil {
 		// (SAFETY) To ensure messages aren't signed blindly because some rouge
 		// Party started signing without a valid reason, this Party will only sign if it knows of the digest.

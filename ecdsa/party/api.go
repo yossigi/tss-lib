@@ -85,7 +85,7 @@ func NewFullParty(p *Parameters) FullParty {
 			DigestToSigner:   map[string]*SingleSigner{},
 			SigPartReadyChan: nil, // set up during Start()
 		},
-		incomingMessagesChannel: make(chan tss.ParsedMessage),
+		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.partyIDs)*100),
 		// TODO: not sure this is needed
 		IdToPIDmapping: map[string]*tss.PartyID{},
 		// the following fields should be provided in Start()
