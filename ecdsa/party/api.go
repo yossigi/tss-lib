@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"sync"
+	"time"
 
 	"github.com/bnb-chain/tss-lib/v2/common"
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
@@ -21,8 +22,9 @@ type Parameters struct {
 
 	// P2P keys for generating signature all Players should recognise, more formally, this SecretKey should be tied
 	// to the encoded public key in the Self field
-	SecretKey *ecdsa.PrivateKey // TODO: this isn't really needed by this package, but by a reliable broadcast package
-	WorkDir   string
+	SecretKey    *ecdsa.PrivateKey // TODO: this isn't really needed by this package, but by a reliable broadcast package
+	WorkDir      string
+	MaxSignerTTL time.Duration
 }
 
 type Digest [32]byte
@@ -58,6 +60,9 @@ func NewFullParty(p *Parameters) FullParty {
 
 	p.ensurePartiesContainsSelf()
 
+	if p.MaxSignerTTL == 0 {
+		p.MaxSignerTTL = time.Minute * 5
+	}
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
@@ -83,11 +88,11 @@ func NewFullParty(p *Parameters) FullParty {
 		incomingMessagesChannel: make(chan tss.ParsedMessage),
 		// TODO: not sure this is needed
 		IdToPIDmapping: map[string]*tss.PartyID{},
-
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
 		OutChan:                nil,
 		signatureOutputChannel: nil,
+		MaxTTl:                 p.MaxSignerTTL,
 	}
 	return imp
 }

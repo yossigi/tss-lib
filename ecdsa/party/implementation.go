@@ -42,6 +42,7 @@ type SingleSigner struct {
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
 	LocalParty tss.Party
+	sync.Once
 }
 
 func (s *SingleSigner) sortMessageBuffer() {
@@ -100,6 +101,35 @@ type Impl struct {
 	errorChannel           chan<- *tss.Error
 	OutChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
+	MaxTTl                 time.Duration
+}
+
+func (p *Impl) cleanupWorker() {
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+
+		case <-time.After(p.MaxTTl):
+			p.SigningHandler.cleanup(p.MaxTTl)
+		}
+	}
+}
+func (s *SigningHandler) cleanup(maxTTL time.Duration) {
+	nmap := make(map[string]*SingleSigner)
+	s.Mtx.Lock()
+	defer s.Mtx.Unlock()
+
+	currentTime := time.Now()
+	for digest, signer := range s.DigestToSigner {
+		if currentTime.Sub(signer.Time) > maxTTL {
+			continue
+		}
+
+		nmap[digest] = signer
+	}
+
+	s.DigestToSigner = nmap
 }
 
 func (p *Impl) getPublic() *ecdsa.PublicKey {
@@ -191,6 +221,7 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 		go p.worker()
 	}
 
+	go p.cleanupWorker()
 	if err := p.KeygenHandler.setup(outChannel, p.PartyID); err != nil {
 		p.Stop()
 		return fmt.Errorf("keygen handler setup failed: %w", err)
@@ -249,7 +280,7 @@ func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalParty
 			p.OutChan,
 			p.signatureOutputChannel,
 		)
-
+		// TODO: use Once to ensure this happens once and outside of lock!
 		if err := signer.LocalParty.Start(); err != nil {
 			return nil, err
 		}

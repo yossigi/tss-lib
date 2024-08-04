@@ -185,6 +185,41 @@ func testLateParties(t *testing.T, numLate int) {
 	}
 }
 
+func TestCleanup(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	maxTTL := time.Second * 1
+	for _, impl := range parties {
+		impl.(*Impl).MaxTTl = maxTTL
+	}
+	n := networkSimulator{
+		outchan: make(chan tss.Message, len(parties)*20),
+		sigchan: make(chan *common.SignatureData, test.TestParticipants),
+		errchan: make(chan *tss.Error, 1),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+	p1 := parties[0].(*Impl)
+	digest := Digest{}
+	a.NoError(p1.AsyncRequestNewSignature(digest))
+
+	p1.SigningHandler.Mtx.Lock()
+	a.Lenf(p1.SigningHandler.DigestToSigner, 1, "expected 1 signer ")
+	p1.SigningHandler.Mtx.Unlock()
+	<-time.After(maxTTL * 2)
+
+	p1.SigningHandler.Mtx.Lock()
+	a.Lenf(p1.SigningHandler.DigestToSigner, 0, "expected 0 signers ")
+	p1.SigningHandler.Mtx.Unlock()
+
+	for _, party := range parties {
+		party.Stop()
+	}
+}
+
 type networkSimulator struct {
 	outchan         chan tss.Message
 	sigchan         chan *common.SignatureData
