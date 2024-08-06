@@ -31,25 +31,25 @@ type Parameters struct {
 type Digest [32]byte
 
 type FullParty interface {
-	// Start will set up the FullParty, and few sub-components (including few
-	// goroutines). outChannel: will be used by this Party to request messages
-	// to be sent outside, these messages can be either broadcast requests
-	// (using protocol like reliable broadcast), or unicast requests (which
-	// should be encrypted) signatureOutputChannel: will be used by this Party
-	// to output a signature which should be aggragated by a relay and
-	// constructed into a single ecdsa signature.
+	// Start sets up the FullParty and a few sub-components (including a few
+	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
+	// Broadcast protocol) or Uni-cast over the network (messages should be signed and encrypted).
+	// signatureOutputChannel: this channel delivers the final output of a signature protocol (a usable signature).
+	// errChannel: this channel delivers any error during the protocol.Time
 	Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error
 
-	// Stop will Stop the FullPlarty
+	// Stop stops the FullParty, and closes its sub-components.
 	Stop()
 
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
+	// The signature protocol will not begin until Start() is called, even if this FullParty received
+	// messages over the network.
 	AsyncRequestNewSignature(Digest) error
 
-	// Update will Update the FullParty with the ParsedMessage
-	// while running the protocol.
+	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
 
+	// getPublic returns the public key of the FullParty
 	getPublic() *ecdsa.PublicKey
 }
 
