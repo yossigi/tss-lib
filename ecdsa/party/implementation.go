@@ -71,7 +71,6 @@ type Impl struct {
 
 	incomingMessagesChannel chan tss.ParsedMessage
 
-	IdToPIDmapping         map[string]*tss.PartyID
 	errorChannel           chan<- *tss.Error
 	OutChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData

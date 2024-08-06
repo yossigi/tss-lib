@@ -76,6 +76,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		PartyID:     p.Self,
 		PeerContext: pctx,
 		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
+
 		KeygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
 			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
@@ -84,14 +85,15 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 			LocalParty: nil,
 			SavedData:  p.savedParams,
 		},
+
 		SigningHandler: &SigningHandler{
 			Mtx:              sync.Mutex{},
 			DigestToSigner:   map[string]*SingleSigner{},
 			SigPartReadyChan: nil, // set up during Start()
 		},
-		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.partyIDs)*100),
-		// TODO: not sure this is needed
-		IdToPIDmapping: map[string]*tss.PartyID{},
+
+		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.partyIDs)),
+
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
 		OutChan:                nil,
