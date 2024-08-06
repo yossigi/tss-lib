@@ -30,9 +30,9 @@ type KeygenHandler struct {
 }
 
 type SingleSigner struct {
-	// Time represents the time when the first message was received.
+	// Time represents the moment this signleSigner is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
-	time.Time
+	Time time.Time
 
 	// used as buffer for messages received before starting signing.
 	// will be consumed once signing starts.
@@ -251,7 +251,7 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	secrets := p.KeygenHandler.getSavedParams()
 	if secrets == nil {
-		return errors.New("no keygen data to sign with")
+		return errors.New("no key to sign with")
 	}
 
 	signer, err := p.getOrCreateSingleSigner(digest, secrets)
