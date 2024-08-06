@@ -4,8 +4,12 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,18 +21,71 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSigning(t *testing.T) {
-	t.Run("single signature", func(t *testing.T) { testSigning(t, 1) })
-	t.Run("five signatures ", func(t *testing.T) { testSigning(t, 5) })
+func getProjectRootDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	abs, err := filepath.Abs(wd)
+	if err != nil {
+		panic(err)
+	}
+
+	cur := abs
+	for {
+		cur = filepath.Dir(abs)
+		if cur == "" {
+			panic("could not find project root")
+		}
+
+		if !strings.Contains(cur, "tss-lib") {
+			break
+		}
+		abs = cur
+
+	}
+
+	return abs
 }
 
-func testSigning(t *testing.T, numSignatures int) {
+func TestSigning(t *testing.T) {
+	st := signerTester{
+		participants:             test.TestParticipants,
+		threshold:                test.TestThreshold,
+		numSignatures:            1,
+		keygenLocation:           "",
+		maxNetworkSimulationTime: time.Second * 50,
+	}
+	t.Run("one signature", st.run)
+
+	st.numSignatures = 5
+	st.maxNetworkSimulationTime = time.Second * 50
+	t.Run("five signatures ", st.run)
+
+	st2 := signerTester{
+		participants:             5,
+		threshold:                3,
+		numSignatures:            50,
+		keygenLocation:           path.Join(getProjectRootDir(), "test", "_ecdsa_quick"),
+		maxNetworkSimulationTime: time.Minute,
+	}
+	t.Run("3 threshold 20 signatures", st2.run)
+}
+
+type signerTester struct {
+	participants, threshold, numSignatures int
+	keygenLocation                         string
+	maxNetworkSimulationTime               time.Duration
+}
+
+func (st *signerTester) run(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, st.participants, st.threshold, st.keygenLocation)
 
 	digestSet := make(map[Digest]bool)
-	for i := 0; i < numSignatures; i++ {
+	for i := 0; i < st.numSignatures; i++ {
 		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
 		hash := Digest{}
 		copy(hash[:], d)
@@ -37,7 +94,7 @@ func testSigning(t *testing.T, numSignatures int) {
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		sigchan:         make(chan *common.SignatureData, st.participants),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
@@ -334,7 +391,31 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 	}
 }
 
-func makeTestParameters(a *assert.Assertions, participants, threshold int) []Parameters {
+func makeTestParameters(a *assert.Assertions, participants, threshold int, location string) []Parameters {
+
+	if location != "" {
+		ps := make([]Parameters, threshold+1)
+		sortedIds := make([]*tss.PartyID, len(ps))
+
+		for i := 0; i < len(ps); i++ {
+			kg := KeygenHandler{
+				StoragePath: location,
+			}
+			a.NoError(kg.setup(nil, &tss.PartyID{Index: i}))
+			key := kg.SavedData.Ks[i]
+			sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
+
+			ps[i] = Parameters{
+				savedParams: kg.SavedData,
+				partyIDs:    sortedIds,
+				Self:        sortedIds[i],
+				Threshold:   threshold,
+			}
+		}
+
+		return ps
+	}
+
 	keys, signPIDs, err := keygen.LoadKeygenTestFixturesRandomSet(threshold+1, participants)
 	a.NoError(err, "should load keygen fixtures")
 
@@ -354,8 +435,12 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 	return ps
 }
 
-func createFullParties(a *assert.Assertions, participants, threshold int) ([]FullParty, []Parameters) {
-	params := makeTestParameters(a, participants, threshold)
+func createFullParties(a *assert.Assertions, participants, threshold int, location ...string) ([]FullParty, []Parameters) {
+	lc := ""
+	if len(location) > 0 {
+		lc = location[0]
+	}
+	params := makeTestParameters(a, participants, threshold, lc)
 	parties := make([]FullParty, len(params))
 
 	for i := range params {
