@@ -3,6 +3,7 @@ package party
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"sync"
 	"time"
 
@@ -53,16 +54,19 @@ type FullParty interface {
 }
 
 // NewFullParty returns a new FullParty instance.
-func NewFullParty(p *Parameters) FullParty {
+func NewFullParty(p *Parameters) (FullParty, error) {
 	if p == nil {
-		return nil
+		return nil, errors.New("nil parameters")
 	}
 
-	p.ensurePartiesContainsSelf()
+	if !p.ensurePartiesContainsSelf() {
+		return nil, errors.New("self partyID not found in partyIDs list")
+	}
 
 	if p.MaxSignerTTL == 0 {
-		p.MaxSignerTTL = time.Minute * 5
+		p.MaxSignerTTL = SignerMaxTTL
 	}
+
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
@@ -94,15 +98,14 @@ func NewFullParty(p *Parameters) FullParty {
 		signatureOutputChannel: nil,
 		MaxTTl:                 p.MaxSignerTTL,
 	}
-	return imp
+	return imp, nil
 }
 
-func (p *Parameters) ensurePartiesContainsSelf() {
+func (p *Parameters) ensurePartiesContainsSelf() bool {
 	for _, party := range p.partyIDs {
 		if party.Id == p.Self.Id {
-			return
+			return true
 		}
 	}
-
-	p.partyIDs = append(p.partyIDs, p.Self)
+	return false
 }

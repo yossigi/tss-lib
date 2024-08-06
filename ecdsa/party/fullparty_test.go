@@ -359,7 +359,9 @@ func createFullParties(a *assert.Assertions, participants, threshold int) ([]Ful
 	parties := make([]FullParty, len(params))
 
 	for i := range params {
-		parties[i] = NewFullParty(&params[i])
+		p, err := NewFullParty(&params[i])
+		a.NoError(err)
+		parties[i] = p
 	}
 	return parties, params
 }
