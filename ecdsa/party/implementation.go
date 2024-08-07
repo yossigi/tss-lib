@@ -61,7 +61,6 @@ type Impl struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	SecretKey   *ecdsa.PrivateKey
 	PartyID     *tss.PartyID
 	PeerContext *tss.PeerContext
 	Parameters  *tss.Parameters

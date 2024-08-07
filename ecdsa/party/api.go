@@ -72,7 +72,6 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	imp := &Impl{
 		ctx:         ctx,
 		cancelFunc:  cancelF,
-		SecretKey:   p.SecretKey,
 		PartyID:     p.Self,
 		PeerContext: pctx,
 		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
