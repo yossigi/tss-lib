@@ -69,11 +69,11 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	imp := &Impl{
 		ctx:         ctx,
 		cancelFunc:  cancelF,
-		PartyID:     p.Self,
-		PeerContext: pctx,
-		Parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
+		partyID:     p.Self,
+		peerContext: pctx,
+		parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
 
-		KeygenHandler: &KeygenHandler{
+		keygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
 			ProtocolEndOutput: make(chan *keygen.LocalPartySaveData, 1),
 
@@ -82,19 +82,19 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 			SavedData:  p.savedParams,
 		},
 
-		SigningHandler: &SigningHandler{
-			Mtx:              sync.Mutex{},
-			DigestToSigner:   map[string]*singleSigner{},
-			SigPartReadyChan: nil, // set up during Start()
+		signingHandler: &signingHandler{
+			mtx:              sync.Mutex{},
+			digestToSigner:   map[string]*singleSigner{},
+			sigPartReadyChan: nil, // set up during Start()
 		},
 
 		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.partyIDs)),
 
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
-		OutChan:                nil,
+		outChan:                nil,
 		signatureOutputChannel: nil,
-		MaxTTl:                 p.MaxSignerTTL,
+		maxTTl:                 p.MaxSignerTTL,
 	}
 	return imp, nil
 }

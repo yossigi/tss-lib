@@ -171,13 +171,13 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	impl := parties[len(parties)-1].(*Impl)
 
 	// test:
-	impl.SigningHandler.Mtx.Lock()
-	singleSigner, ok := impl.SigningHandler.DigestToSigner[string(hash[:])]
+	impl.signingHandler.mtx.Lock()
+	singleSigner, ok := impl.signingHandler.digestToSigner[string(hash[:])]
 	a.True(ok)
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
 	a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
-	parties[len(parties)-1].(*Impl).SigningHandler.Mtx.Unlock()
+	parties[len(parties)-1].(*Impl).signingHandler.mtx.Unlock()
 
 	for _, party := range parties {
 		party.Stop()
@@ -252,7 +252,7 @@ func TestCleanup(t *testing.T) {
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 	maxTTL := time.Second * 1
 	for _, impl := range parties {
-		impl.(*Impl).MaxTTl = maxTTL
+		impl.(*Impl).maxTTl = maxTTL
 	}
 	n := networkSimulator{
 		outchan: make(chan tss.Message, len(parties)*20),
@@ -267,14 +267,14 @@ func TestCleanup(t *testing.T) {
 	digest := Digest{}
 	a.NoError(p1.AsyncRequestNewSignature(digest))
 
-	p1.SigningHandler.Mtx.Lock()
-	a.Lenf(p1.SigningHandler.DigestToSigner, 1, "expected 1 signer ")
-	p1.SigningHandler.Mtx.Unlock()
+	p1.signingHandler.mtx.Lock()
+	a.Lenf(p1.signingHandler.digestToSigner, 1, "expected 1 signer ")
+	p1.signingHandler.mtx.Unlock()
 	<-time.After(maxTTL * 2)
 
-	p1.SigningHandler.Mtx.Lock()
-	a.Lenf(p1.SigningHandler.DigestToSigner, 0, "expected 0 signers ")
-	p1.SigningHandler.Mtx.Unlock()
+	p1.signingHandler.mtx.Lock()
+	a.Lenf(p1.signingHandler.digestToSigner, 0, "expected 0 signers ")
+	p1.signingHandler.mtx.Unlock()
 
 	for _, party := range parties {
 		party.Stop()
@@ -305,7 +305,7 @@ func (n *networkSimulator) verifiedAllSignatures() bool {
 func idToParty(parties []FullParty) map[string]FullParty {
 	idToFullParty := map[string]FullParty{}
 	for _, p := range parties {
-		idToFullParty[p.(*Impl).PartyID.Id] = p
+		idToFullParty[p.(*Impl).partyID.Id] = p
 	}
 	return idToFullParty
 }
@@ -426,7 +426,6 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 			partyIDs:    signPIDs,
 			Self:        signPIDs[i],
 			Threshold:   threshold,
-			SecretKey:   nil,
 			WorkDir:     "",
 		}
 		ps = append(ps, params)

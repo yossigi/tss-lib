@@ -45,35 +45,35 @@ type singleSigner struct {
 	mtx        sync.Mutex
 }
 
-// SigningHandler handles all signers in the FullParty.
+// signingHandler handles all signers in the FullParty.
 // The proper way to get a signer is to call getSignerOrCacheMessage, or getOrCreateSingleSigner.
 // the former is used when we receive a request to sign, thus the signleSigner should have a LocalParty instance to process messages.
 // the latter is used when we receive a message, but we might not YET be authorized to sign.
-type SigningHandler struct {
-	Mtx sync.Mutex
+type signingHandler struct {
+	mtx sync.Mutex
 
-	DigestToSigner map[string]*singleSigner
+	digestToSigner map[string]*singleSigner
 
-	SigPartReadyChan chan *common.SignatureData
+	sigPartReadyChan chan *common.SignatureData
 }
 
 type Impl struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	PartyID     *tss.PartyID
-	PeerContext *tss.PeerContext
-	Parameters  *tss.Parameters
+	partyID     *tss.PartyID
+	peerContext *tss.PeerContext
+	parameters  *tss.Parameters
 
-	KeygenHandler  *KeygenHandler
-	SigningHandler *SigningHandler
+	keygenHandler  *KeygenHandler
+	signingHandler *signingHandler
 
 	incomingMessagesChannel chan tss.ParsedMessage
 
 	errorChannel           chan<- *tss.Error
-	OutChan                chan tss.Message
+	outChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
-	MaxTTl                 time.Duration
+	maxTTl                 time.Duration
 }
 
 func (p *Impl) cleanupWorker() {
@@ -82,18 +82,18 @@ func (p *Impl) cleanupWorker() {
 		case <-p.ctx.Done():
 			return
 
-		case <-time.After(p.MaxTTl):
-			p.SigningHandler.cleanup(p.MaxTTl)
+		case <-time.After(p.maxTTl):
+			p.signingHandler.cleanup(p.maxTTl)
 		}
 	}
 }
-func (s *SigningHandler) cleanup(maxTTL time.Duration) {
+func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	nmap := make(map[string]*singleSigner)
-	s.Mtx.Lock()
-	defer s.Mtx.Unlock()
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 
 	currentTime := time.Now()
-	for digest, signer := range s.DigestToSigner {
+	for digest, signer := range s.digestToSigner {
 		if currentTime.Sub(signer.time) > maxTTL {
 			continue
 		}
@@ -101,22 +101,22 @@ func (s *SigningHandler) cleanup(maxTTL time.Duration) {
 		nmap[digest] = signer
 	}
 
-	s.DigestToSigner = nmap
+	s.digestToSigner = nmap
 }
 
 func (p *Impl) getPublic() *ecdsa.PublicKey {
-	if p.KeygenHandler == nil {
+	if p.keygenHandler == nil {
 		return nil
 	}
-	if p.KeygenHandler.SavedData == nil {
-		return nil
-	}
-
-	if p.KeygenHandler.SavedData.ECDSAPub == nil {
+	if p.keygenHandler.SavedData == nil {
 		return nil
 	}
 
-	return p.KeygenHandler.SavedData.ECDSAPub.ToECDSAPubKey()
+	if p.keygenHandler.SavedData.ECDSAPub == nil {
+		return nil
+	}
+
+	return p.keygenHandler.SavedData.ECDSAPub.ToECDSAPubKey()
 }
 
 func (k *KeygenHandler) setup(outChan chan tss.Message, selfId *tss.PartyID) error {
@@ -168,11 +168,11 @@ func (p *Impl) worker() {
 			case signingProtocolType:
 				p.handleIncomingSigningMessage(message)
 			default:
-				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.PartyID, message.GetFrom())
+				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.partyID, message.GetFrom())
 			}
-		case o := <-p.KeygenHandler.ProtocolEndOutput:
-			if err := p.KeygenHandler.storeKeygenData(o); err != nil {
-				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.PartyID, nil)
+		case o := <-p.keygenHandler.ProtocolEndOutput:
+			if err := p.keygenHandler.storeKeygenData(o); err != nil {
+				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.partyID, nil)
 			}
 		case <-p.ctx.Done():
 			return
@@ -187,14 +187,14 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 
 	p.errorChannel = errChannel
 	p.signatureOutputChannel = signatureOutputChannel
-	p.OutChan = outChannel
+	p.outChan = outChannel
 
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go p.worker()
 	}
 
 	go p.cleanupWorker()
-	if err := p.KeygenHandler.setup(outChannel, p.PartyID); err != nil {
+	if err := p.keygenHandler.setup(outChannel, p.partyID); err != nil {
 		p.Stop()
 		return fmt.Errorf("keygen handler setup failed: %w", err)
 	}
@@ -207,7 +207,7 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	secrets := p.KeygenHandler.getSavedParams()
+	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
 		return errors.New("no key to sign with")
 	}
@@ -234,13 +234,13 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	return nil
 }
 
-func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
-	s.Mtx.Lock()
+func (s *signingHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
+	s.mtx.Lock()
 
-	signer, ok := s.DigestToSigner[string(message.WireMsg().GetDigest())]
+	signer, ok := s.digestToSigner[string(message.WireMsg().GetDigest())]
 	if !ok {
 
-		s.DigestToSigner[string(message.WireMsg().GetDigest())] = &singleSigner{
+		s.digestToSigner[string(message.WireMsg().GetDigest())] = &singleSigner{
 			time:          time.Now(),
 			messageBuffer: []tss.ParsedMessage{message},
 			localParty:    nil, // cannot be set int this method. Must be set in getOrCreateSingleSigner
@@ -248,11 +248,11 @@ func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*si
 			mtx:           sync.Mutex{},
 		}
 
-		s.Mtx.Unlock()
+		s.mtx.Unlock()
 
 		return nil, nil
 	}
-	s.Mtx.Unlock()
+	s.mtx.Unlock()
 
 	signer.mtx.Lock()
 	// haven't been requested to sign this digest yet: cache the message, and return a nil signer.
@@ -277,21 +277,21 @@ func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*si
 }
 
 func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*singleSigner, error) {
-	p.SigningHandler.Mtx.Lock()
-	signer, ok := p.SigningHandler.DigestToSigner[string(digest[:])]
+	p.signingHandler.mtx.Lock()
+	signer, ok := p.signingHandler.digestToSigner[string(digest[:])]
 	if !ok {
 		signer = &singleSigner{time: time.Now()}
-		p.SigningHandler.DigestToSigner[string(digest[:])] = signer
+		p.signingHandler.digestToSigner[string(digest[:])] = signer
 	}
-	p.SigningHandler.Mtx.Unlock()
+	p.signingHandler.mtx.Unlock()
 
 	signer.mtx.Lock()
 	if signer.localParty == nil {
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			p.Parameters,
+			p.parameters,
 			*secrets,
-			p.OutChan,
+			p.outChan,
 			p.signatureOutputChannel,
 		)
 	}
@@ -317,7 +317,7 @@ func (p *Impl) Update(message tss.ParsedMessage) error {
 }
 
 func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
-	signer, err := p.SigningHandler.getSignerOrCacheMessage(message)
+	signer, err := p.signingHandler.getSignerOrCacheMessage(message)
 	if err != nil {
 		p.reportError(err)
 		return
