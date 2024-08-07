@@ -32,9 +32,8 @@ func getProjectRootDir() string {
 		panic(err)
 	}
 
-	cur := abs
 	for {
-		cur = filepath.Dir(abs)
+		cur := filepath.Dir(abs)
 		if cur == "" {
 			panic("could not find project root")
 		}
