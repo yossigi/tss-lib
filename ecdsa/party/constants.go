@@ -11,3 +11,4 @@ import (
 )
 
 const SignerMaxTTL = time.Minute * 5
+const maxStoragePerParty = 100

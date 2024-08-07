@@ -28,6 +28,8 @@ type KeygenHandler struct {
 	SavedData *keygen.LocalPartySaveData
 }
 
+type partyIdIndex int
+
 type singleSigner struct {
 	// time represents the moment this signleSigner is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
@@ -35,7 +37,7 @@ type singleSigner struct {
 
 	// used as buffer for messages received before starting signing.
 	// will be consumed once signing starts.
-	messageBuffer []tss.ParsedMessage
+	messageBuffer map[partyIdIndex][]tss.ParsedMessage
 
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
@@ -213,21 +215,28 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 		return err
 	}
 
+	signer.consumeBuffer(p.reportError)
+
+	return nil
+}
+
+func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error)) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
 	if len(signer.messageBuffer) > 0 {
-		for _, message := range signer.messageBuffer {
-			ok, err := signer.localParty.Update(message)
-			if !ok {
-				p.reportError(err)
+		for _, messages := range signer.messageBuffer {
+			for _, message := range messages {
+				ok, err := signer.localParty.Update(message)
+				if !ok {
+					errReportFunc(err)
+				}
 			}
 		}
 
 		signer.messageBuffer = nil
 	}
 
-	return nil
 }
 
 // The signer isn't necessarily authorised to sign yet. as a result, we might return a nil signer - to ensure
@@ -235,7 +244,7 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
 
-	if signer.storeToCacheIfNotAuthorised(message) {
+	if signer.attemptToStoreToCacheIfNotAuthorised(message) {
 		return nil, nil
 	}
 
@@ -268,17 +277,23 @@ func (signer *singleSigner) ensureStarted() *tss.Error {
 	return e
 }
 
-func (signer *singleSigner) storeToCacheIfNotAuthorised(message tss.ParsedMessage) bool {
+// returns whether this signer attempted to store the message.
+func (signer *singleSigner) attemptToStoreToCacheIfNotAuthorised(message tss.ParsedMessage) bool {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	if signer.localParty == nil {
-		signer.messageBuffer = append(signer.messageBuffer, message)
+	if signer.localParty != nil {
+		return false
+	}
+
+	pindex := partyIdIndex(message.GetFrom().Index)
+	if len(signer.messageBuffer[pindex]) > maxStoragePerParty {
 		return true
 	}
 
-	return false
+	signer.messageBuffer[pindex] = append(signer.messageBuffer[pindex], message)
 
+	return true
 }
 
 func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error {
@@ -313,7 +328,7 @@ func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner
 	if !ok {
 		s.digestToSigner[digestStr] = &singleSigner{
 			time:          time.Now(),
-			messageBuffer: []tss.ParsedMessage{},
+			messageBuffer: map[partyIdIndex][]tss.ParsedMessage{},
 			localParty:    nil,
 			once:          sync.Once{},
 			mtx:           sync.Mutex{},
