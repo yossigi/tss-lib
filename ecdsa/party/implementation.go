@@ -46,9 +46,7 @@ type singleSigner struct {
 }
 
 // signingHandler handles all signers in the FullParty.
-// The proper way to get a signer is to call getSignerOrCacheMessage, or getOrCreateSingleSigner.
-// the former is used when we receive a request to sign, thus the signleSigner should have a LocalParty instance to process messages.
-// the latter is used when we receive a message, but we might not YET be authorized to sign.
+// The proper way to get a signer is to use getOrCreateSingleSigner method.
 type signingHandler struct {
 	mtx sync.Mutex
 
@@ -57,6 +55,9 @@ type signingHandler struct {
 	sigPartReadyChan chan *common.SignatureData
 }
 
+// Impl handles multiple signers, and ensures only signers that are authorised to sign
+// (their digest was requested to be signed via AsyncRequestNewSignature)
+// are updated with incoming messages.
 type Impl struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -207,7 +208,7 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	signer, err := p.getOrCreateSingleSigner(digest)
+	signer, err := p.getSignerWithAuthorityToSign(digest)
 	if err != nil {
 		return err
 	}
@@ -229,63 +230,66 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	return nil
 }
 
-func (s *signingHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
-	s.mtx.Lock()
+// The signer isn't necessarily authorised to sign yet. as a result, we might return a nil signer - to ensure
+// we don't sign messages blindly.
+func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
+	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
 
-	signer, ok := s.digestToSigner[string(message.WireMsg().GetDigest())]
-	if !ok {
-
-		s.digestToSigner[string(message.WireMsg().GetDigest())] = &singleSigner{
-			time:          time.Now(),
-			messageBuffer: []tss.ParsedMessage{message},
-			localParty:    nil, // cannot be set int this method. Must be set in getOrCreateSingleSigner
-			once:          sync.Once{},
-			mtx:           sync.Mutex{},
-		}
-
-		s.mtx.Unlock()
-
+	if signer.storeToCacheIfNotAuthorised(message) {
 		return nil, nil
 	}
-	s.mtx.Unlock()
 
-	signer.mtx.Lock()
-	// haven't been requested to sign this digest yet: cache the message, and return a nil signer.
-	if signer.localParty == nil {
-		signer.messageBuffer = append(signer.messageBuffer, message)
-		signer.mtx.Unlock()
+	// signer is authorised to sign since it declined caching the message.
+	return signer, signer.ensureStarted()
+}
 
-		return nil, nil
+func (p *Impl) getSignerWithAuthorityToSign(digest Digest) (*singleSigner, error) {
+	signer := p.signingHandler.getOrCreateSingleSigner(string(digest[:]))
+
+	if err := p.authoriseSignerToSign(digest, signer); err != nil {
+		return nil, err
 	}
-	signer.mtx.Unlock()
 
-	// signer.LocalParty is not nil: signing is permitted.
-	// We ensure we don't return an uninitialized localParty, by calling Start() if it hasn't been called yet.
-	var e *tss.Error
-	signer.once.Do(func() { e = signer.localParty.Start() })
-
-	if e != nil && e.Cause() != nil {
-		return nil, e
+	if err := signer.ensureStarted(); err != nil {
+		return nil, err
 	}
 
 	return signer, nil
 }
 
-func (p *Impl) getOrCreateSingleSigner(digest Digest) (*singleSigner, error) {
+func (signer *singleSigner) ensureStarted() *tss.Error {
+	var e *tss.Error
+	signer.once.Do(func() {
+		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
+			e = err
+		}
+	})
+
+	return e
+}
+
+func (signer *singleSigner) storeToCacheIfNotAuthorised(message tss.ParsedMessage) bool {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
+	if signer.localParty == nil {
+		signer.messageBuffer = append(signer.messageBuffer, message)
+		return true
+	}
+
+	return false
+
+}
+
+func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error {
 	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
-		return nil, errors.New("no key to sign with")
+		return errors.New("no key to sign with")
 	}
-
-	p.signingHandler.mtx.Lock()
-	signer, ok := p.signingHandler.digestToSigner[string(digest[:])]
-	if !ok {
-		signer = &singleSigner{time: time.Now()}
-		p.signingHandler.digestToSigner[string(digest[:])] = signer
-	}
-	p.signingHandler.mtx.Unlock()
 
 	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
 	if signer.localParty == nil {
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
@@ -295,16 +299,30 @@ func (p *Impl) getOrCreateSingleSigner(digest Digest) (*singleSigner, error) {
 			p.signatureOutputChannel,
 		)
 	}
-	signer.mtx.Unlock()
 
-	var e error
-	signer.once.Do(func() {
-		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
-			e = err
+	return nil
+}
+
+// getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.
+// the returned signer doesn't necessarily has a localParty instance, meaning it isn't allowed to sign yet.
+func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	signer, ok := s.digestToSigner[digestStr]
+	if !ok {
+		s.digestToSigner[digestStr] = &singleSigner{
+			time:          time.Now(),
+			messageBuffer: []tss.ParsedMessage{},
+			localParty:    nil,
+			once:          sync.Once{},
+			mtx:           sync.Mutex{},
 		}
-	})
 
-	return signer, e
+		signer = s.digestToSigner[digestStr]
+	}
+
+	return signer
 }
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
@@ -317,7 +335,7 @@ func (p *Impl) Update(message tss.ParsedMessage) error {
 }
 
 func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
-	signer, err := p.signingHandler.getSignerOrCacheMessage(message)
+	signer, err := p.getSignerOrCacheMessage(message)
 	if err != nil {
 		p.reportError(err)
 		return
