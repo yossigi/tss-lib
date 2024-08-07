@@ -207,12 +207,7 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	secrets := p.keygenHandler.getSavedParams()
-	if secrets == nil {
-		return errors.New("no key to sign with")
-	}
-
-	signer, err := p.getOrCreateSingleSigner(digest, secrets)
+	signer, err := p.getOrCreateSingleSigner(digest)
 	if err != nil {
 		return err
 	}
@@ -276,7 +271,12 @@ func (s *signingHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*si
 	return signer, nil
 }
 
-func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*singleSigner, error) {
+func (p *Impl) getOrCreateSingleSigner(digest Digest) (*singleSigner, error) {
+	secrets := p.keygenHandler.getSavedParams()
+	if secrets == nil {
+		return nil, errors.New("no key to sign with")
+	}
+
 	p.signingHandler.mtx.Lock()
 	signer, ok := p.signingHandler.digestToSigner[string(digest[:])]
 	if !ok {
