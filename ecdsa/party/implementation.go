@@ -28,21 +28,21 @@ type KeygenHandler struct {
 	SavedData *keygen.LocalPartySaveData
 }
 
-type SingleSigner struct {
-	// Time represents the moment this signleSigner is created.
+type singleSigner struct {
+	// time represents the moment this signleSigner is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
-	Time time.Time
+	time time.Time
 
 	// used as buffer for messages received before starting signing.
 	// will be consumed once signing starts.
-	MessageBuffer []tss.ParsedMessage
+	messageBuffer []tss.ParsedMessage
 
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
-	LocalParty tss.Party
-	sync.Once
-	Mtx sync.Mutex
+	localParty tss.Party
+	once       sync.Once
+	mtx        sync.Mutex
 }
 
 // SigningHandler handles all signers in the FullParty.
@@ -52,7 +52,7 @@ type SingleSigner struct {
 type SigningHandler struct {
 	Mtx sync.Mutex
 
-	DigestToSigner map[string]*SingleSigner
+	DigestToSigner map[string]*singleSigner
 
 	SigPartReadyChan chan *common.SignatureData
 }
@@ -88,13 +88,13 @@ func (p *Impl) cleanupWorker() {
 	}
 }
 func (s *SigningHandler) cleanup(maxTTL time.Duration) {
-	nmap := make(map[string]*SingleSigner)
+	nmap := make(map[string]*singleSigner)
 	s.Mtx.Lock()
 	defer s.Mtx.Unlock()
 
 	currentTime := time.Now()
 	for digest, signer := range s.DigestToSigner {
-		if currentTime.Sub(signer.Time) > maxTTL {
+		if currentTime.Sub(signer.time) > maxTTL {
 			continue
 		}
 
@@ -217,35 +217,35 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 		return err
 	}
 
-	signer.Mtx.Lock()
-	defer signer.Mtx.Unlock()
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
 
-	if len(signer.MessageBuffer) > 0 {
-		for _, message := range signer.MessageBuffer {
-			ok, err := signer.LocalParty.Update(message)
+	if len(signer.messageBuffer) > 0 {
+		for _, message := range signer.messageBuffer {
+			ok, err := signer.localParty.Update(message)
 			if !ok {
 				p.reportError(err)
 			}
 		}
 
-		signer.MessageBuffer = nil
+		signer.messageBuffer = nil
 	}
 
 	return nil
 }
 
-func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*SingleSigner, *tss.Error) {
+func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
 	s.Mtx.Lock()
 
 	signer, ok := s.DigestToSigner[string(message.WireMsg().GetDigest())]
 	if !ok {
 
-		s.DigestToSigner[string(message.WireMsg().GetDigest())] = &SingleSigner{
-			Time:          time.Now(),
-			MessageBuffer: []tss.ParsedMessage{message},
-			LocalParty:    nil, // cannot be set int this method. Must be set in getOrCreateSingleSigner
-			Once:          sync.Once{},
-			Mtx:           sync.Mutex{},
+		s.DigestToSigner[string(message.WireMsg().GetDigest())] = &singleSigner{
+			time:          time.Now(),
+			messageBuffer: []tss.ParsedMessage{message},
+			localParty:    nil, // cannot be set int this method. Must be set in getOrCreateSingleSigner
+			once:          sync.Once{},
+			mtx:           sync.Mutex{},
 		}
 
 		s.Mtx.Unlock()
@@ -254,20 +254,20 @@ func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*Si
 	}
 	s.Mtx.Unlock()
 
-	signer.Mtx.Lock()
+	signer.mtx.Lock()
 	// haven't been requested to sign this digest yet: cache the message, and return a nil signer.
-	if signer.LocalParty == nil {
-		signer.MessageBuffer = append(signer.MessageBuffer, message)
-		signer.Mtx.Unlock()
+	if signer.localParty == nil {
+		signer.messageBuffer = append(signer.messageBuffer, message)
+		signer.mtx.Unlock()
 
 		return nil, nil
 	}
-	signer.Mtx.Unlock()
+	signer.mtx.Unlock()
 
 	// signer.LocalParty is not nil: signing is permitted.
 	// We ensure we don't return an uninitialized localParty, by calling Start() if it hasn't been called yet.
 	var e *tss.Error
-	signer.Once.Do(func() { e = signer.LocalParty.Start() })
+	signer.once.Do(func() { e = signer.localParty.Start() })
 
 	if e != nil && e.Cause() != nil {
 		return nil, e
@@ -276,18 +276,18 @@ func (s *SigningHandler) getSignerOrCacheMessage(message tss.ParsedMessage) (*Si
 	return signer, nil
 }
 
-func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*SingleSigner, error) {
+func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalPartySaveData) (*singleSigner, error) {
 	p.SigningHandler.Mtx.Lock()
 	signer, ok := p.SigningHandler.DigestToSigner[string(digest[:])]
 	if !ok {
-		signer = &SingleSigner{Time: time.Now()}
+		signer = &singleSigner{time: time.Now()}
 		p.SigningHandler.DigestToSigner[string(digest[:])] = signer
 	}
 	p.SigningHandler.Mtx.Unlock()
 
-	signer.Mtx.Lock()
-	if signer.LocalParty == nil {
-		signer.LocalParty = signing.NewLocalParty(
+	signer.mtx.Lock()
+	if signer.localParty == nil {
+		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
 			p.Parameters,
 			*secrets,
@@ -295,11 +295,11 @@ func (p *Impl) getOrCreateSingleSigner(digest Digest, secrets *keygen.LocalParty
 			p.signatureOutputChannel,
 		)
 	}
-	signer.Mtx.Unlock()
+	signer.mtx.Unlock()
 
 	var e error
-	signer.Once.Do(func() {
-		if err := signer.LocalParty.Start(); err != nil && err.Cause() != nil {
+	signer.once.Do(func() {
+		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
 			e = err
 		}
 	})
@@ -329,7 +329,7 @@ func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
 		return
 	}
 
-	ok, err := signer.LocalParty.Update(message)
+	ok, err := signer.localParty.Update(message)
 	if !ok {
 		p.reportError(err)
 	}

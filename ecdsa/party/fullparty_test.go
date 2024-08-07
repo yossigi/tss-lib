@@ -175,8 +175,8 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	singleSigner, ok := impl.SigningHandler.DigestToSigner[string(hash[:])]
 	a.True(ok)
 	// unless request to sign something, LocalParty should remain nil.
-	a.Nil(singleSigner.LocalParty)
-	a.GreaterOrEqual(len(singleSigner.MessageBuffer), 1) // ensures this party received at least one message from others
+	a.Nil(singleSigner.localParty)
+	a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
 	parties[len(parties)-1].(*Impl).SigningHandler.Mtx.Unlock()
 
 	for _, party := range parties {

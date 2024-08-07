@@ -35,7 +35,7 @@ type FullParty interface {
 	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
 	// Broadcast protocol) or Uni-cast over the network (messages should be signed and encrypted).
 	// signatureOutputChannel: this channel delivers the final output of a signature protocol (a usable signature).
-	// errChannel: this channel delivers any error during the protocol.Time
+	// errChannel: this channel delivers any error during the protocol.
 	Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error
 
 	// Stop stops the FullParty, and closes its sub-components.
@@ -87,7 +87,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 		SigningHandler: &SigningHandler{
 			Mtx:              sync.Mutex{},
-			DigestToSigner:   map[string]*SingleSigner{},
+			DigestToSigner:   map[string]*singleSigner{},
 			SigPartReadyChan: nil, // set up during Start()
 		},
 
