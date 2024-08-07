@@ -21,9 +21,6 @@ type Parameters struct {
 
 	Threshold int
 
-	// P2P keys for generating signature all Players should recognise, more formally, this SecretKey should be tied
-	// to the encoded public key in the Self field
-	SecretKey    *ecdsa.PrivateKey // TODO: this isn't really needed by this package, but by a reliable broadcast package
 	WorkDir      string
 	MaxSignerTTL time.Duration
 }
