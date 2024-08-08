@@ -117,7 +117,7 @@ func (round *round3) Start() *tss.Error {
 
 	round.temp.theta = thelta
 	round.temp.sigma = sigma
-	r3msg := NewSignRound3Message(round.PartyID(), thelta)
+	r3msg := NewSignRound3Message(round.PartyID(), thelta, round.temp.m)
 	round.temp.signRound3Messages[round.PartyID().Index] = r3msg
 	round.out <- r3msg
 

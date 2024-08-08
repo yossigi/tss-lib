@@ -8,19 +8,17 @@ package tss
 
 import (
 	"errors"
+
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Used externally to update a LocalParty with a valid ParsedMessage
 func ParseWireMessage(wireBytes []byte, from *PartyID, isBroadcast bool) (ParsedMessage, error) {
 	wire := new(MessageWrapper)
-	wire.Message = new(anypb.Any)
-	wire.From = from.MessageWrapper_PartyID
-	wire.IsBroadcast = isBroadcast
-	if err := proto.Unmarshal(wireBytes, wire.Message); err != nil {
+	if err := proto.Unmarshal(wireBytes, wire); err != nil {
 		return nil, err
 	}
+
 	return parseWrappedMessage(wire, from)
 }
 

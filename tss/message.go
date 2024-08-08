@@ -79,7 +79,8 @@ var (
 // ----- //
 
 // NewMessageWrapper constructs a MessageWrapper from routing metadata and content
-func NewMessageWrapper(routing MessageRouting, content MessageContent) *MessageWrapper {
+// digest is an additional parameter
+func NewMessageWrapper(routing MessageRouting, content MessageContent, digest ...byte) *MessageWrapper {
 	// marshal the content to the ProtoBuf Any type
 	any, _ := anypb.New(content)
 	// convert given PartyIDs to the wire format
@@ -97,6 +98,7 @@ func NewMessageWrapper(routing MessageRouting, content MessageContent) *MessageW
 		From:                    routing.From.MessageWrapper_PartyID,
 		To:                      to,
 		Message:                 any,
+		Digest:                  digest,
 	}
 }
 
@@ -137,10 +139,17 @@ func (mm *MessageImpl) IsToOldAndNewCommittees() bool {
 }
 
 func (mm *MessageImpl) WireBytes() ([]byte, *MessageRouting, error) {
-	bz, err := proto.Marshal(mm.wire.Message)
+	tmp := proto.Clone(mm.wire).(*MessageWrapper)
+
+	// reducing space on wire.
+	tmp.To = nil
+	tmp.From = nil
+
+	bz, err := proto.Marshal(tmp)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return bz, &mm.MessageRouting, nil
 }
 

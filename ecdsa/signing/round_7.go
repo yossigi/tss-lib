@@ -84,7 +84,7 @@ func (round *round7) Start() *tss.Error {
 	round.temp.Ui = crypto.NewECPointNoCurveCheck(round.Params().EC(), UiX, UiY)
 	round.temp.Ti = crypto.NewECPointNoCurveCheck(round.Params().EC(), TiX, TiY)
 	cmt := commitments.NewHashCommitment(round.Rand(), UiX, UiY, TiX, TiY)
-	r7msg := NewSignRound7Message(round.PartyID(), cmt.C)
+	r7msg := NewSignRound7Message(round.PartyID(), cmt.C, round.temp.m)
 	round.temp.signRound7Messages[round.PartyID().Index] = r7msg
 	round.out <- r7msg
 	round.temp.DTelda = cmt.D

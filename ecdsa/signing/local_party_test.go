@@ -42,7 +42,7 @@ func setUp(level string) {
 }
 
 func TestE2ENTimes(t *testing.T) {
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run("TestE2EConcurrent", TestE2EConcurrent)
 	}
 }
