@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 func (round *finalization) Start() *tss.Error {

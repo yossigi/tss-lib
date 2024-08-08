@@ -18,16 +18,16 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	utils "github.com/bnb-chain/tss-lib/v2/ecdsa/ethereum"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/test"
-	"github.com/bnb-chain/tss-lib/v2/tss"
 	"github.com/btcsuite/btcd/btcec/v2"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
+	"github.com/yossigi/tss-lib/v2/common"
+	utils "github.com/yossigi/tss-lib/v2/ecdsa/ethereum"
+	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
+	"github.com/yossigi/tss-lib/v2/test"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 const (

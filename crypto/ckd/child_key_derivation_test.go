@@ -9,7 +9,6 @@ package ckd_test
 import (
 	"testing"
 
-	. "github.com/bnb-chain/tss-lib/v2/crypto/ckd"
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 

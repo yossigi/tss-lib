@@ -11,10 +11,10 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/crypto"
 	"github.com/ethereum/go-ethereum/common"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/yossigi/tss-lib/v2/crypto"
 )
 
 var (
