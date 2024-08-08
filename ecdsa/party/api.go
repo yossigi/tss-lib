@@ -61,7 +61,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	}
 
 	if p.MaxSignerTTL == 0 {
-		p.MaxSignerTTL = SignerMaxTTL
+		p.MaxSignerTTL = signerMaxTTL
 	}
 
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
