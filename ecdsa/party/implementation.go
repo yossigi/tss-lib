@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/signing"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
+	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 type KeygenHandler struct {

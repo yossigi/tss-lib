@@ -20,13 +20,13 @@ import (
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/dlnproof"
-	"github.com/bnb-chain/tss-lib/v2/crypto/paillier"
-	"github.com/bnb-chain/tss-lib/v2/crypto/vss"
-	"github.com/bnb-chain/tss-lib/v2/test"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/yossigi/tss-lib/v2/crypto"
+	"github.com/yossigi/tss-lib/v2/crypto/dlnproof"
+	"github.com/yossigi/tss-lib/v2/crypto/paillier"
+	"github.com/yossigi/tss-lib/v2/crypto/vss"
+	"github.com/yossigi/tss-lib/v2/test"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 const (

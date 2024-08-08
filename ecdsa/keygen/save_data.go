@@ -11,9 +11,9 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/paillier"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/yossigi/tss-lib/v2/crypto"
+	"github.com/yossigi/tss-lib/v2/crypto/paillier"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 type (
