@@ -183,6 +183,60 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	}
 
 }
+func TestMultipleRequestToSignSameThing(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, 5, 3, path.Join(getProjectRootDir(), "test", "_ecdsa_quick"))
+
+	digestSet := make(map[Digest]bool)
+	for i := 0; i < 1; i++ {
+		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		hash := Digest{}
+		copy(hash[:], d)
+		digestSet[hash] = false
+	}
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*1000),
+		sigchan:         make(chan *common.SignatureData, 5),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	for digest := range digestSet {
+		for i := 0; i < 10; i++ {
+			go func(digest Digest) {
+				for _, party := range parties {
+					a.NoError(party.AsyncRequestNewSignature(digest))
+				}
+			}(digest)
+		}
+	}
+
+	time.Sleep(time.Second)
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	fmt.Println("Setup done. test starting.")
+
+	fmt.Println("ngoroutines:", runtime.NumGoroutine())
+	<-donechan
+	a.True(n.verifiedAllSignatures())
+
+	for _, party := range parties {
+		party.Stop()
+	}
+}
 
 func TestLateParties(t *testing.T) {
 	t.Run("single late party", func(t *testing.T) { testLateParties(t, 1) })
