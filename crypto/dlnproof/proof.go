@@ -16,8 +16,8 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	cmts "github.com/bnb-chain/tss-lib/v2/crypto/commitments"
+	"github.com/yossigi/tss-lib/v2/common"
+	cmts "github.com/yossigi/tss-lib/v2/crypto/commitments"
 )
 
 const Iterations = 128

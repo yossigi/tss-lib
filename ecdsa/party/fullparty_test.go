@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/test"
-	"github.com/bnb-chain/tss-lib/v2/tss"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
+	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
+	"github.com/yossigi/tss-lib/v2/test"
+	"github.com/yossigi/tss-lib/v2/tss"
 )
 
 func getProjectRootDir() string {
