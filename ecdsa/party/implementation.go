@@ -97,11 +97,9 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 
 	currentTime := time.Now()
 	for digest, signer := range s.digestToSigner {
-		if currentTime.Sub(signer.time) > maxTTL {
-			continue
+		if currentTime.Sub(signer.time) <= maxTTL {
+			nmap[digest] = signer
 		}
-
-		nmap[digest] = signer
 	}
 
 	s.digestToSigner = nmap
