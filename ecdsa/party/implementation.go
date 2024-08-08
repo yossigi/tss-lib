@@ -242,7 +242,8 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
 
-	if signer.attemptToStoreToCacheIfNotAuthorised(message) {
+	authorised := signer.attemptToCacheIfUnauthorizedToSign(message)
+	if !authorised {
 		return nil, nil
 	}
 
@@ -275,23 +276,23 @@ func (signer *singleSigner) ensureStarted() *tss.Error {
 	return e
 }
 
-// returns whether this signer attempted to store the message.
-func (signer *singleSigner) attemptToStoreToCacheIfNotAuthorised(message tss.ParsedMessage) bool {
+// Since storing to cache is done strictly when this signer had not yet received authority to sign, this
+// method will return a bool indicating whether it is allowed to sign.
+func (signer *singleSigner) attemptToCacheIfUnauthorizedToSign(message tss.ParsedMessage) (authorisedToSign bool) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
 	if signer.localParty != nil {
-		return false
+		authorisedToSign = true
+		return
 	}
 
 	pindex := partyIdIndex(message.GetFrom().Index)
-	if len(signer.messageBuffer[pindex]) > maxStoragePerParty {
-		return true
+	if len(signer.messageBuffer[pindex]) < maxStoragePerParty {
+		signer.messageBuffer[pindex] = append(signer.messageBuffer[pindex], message)
 	}
 
-	signer.messageBuffer[pindex] = append(signer.messageBuffer[pindex], message)
-
-	return true
+	return
 }
 
 func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error {
