@@ -37,70 +37,82 @@ func (round *round2) Start() *tss.Error {
 			continue
 		}
 		// Bob_mid
-		go func(j int, Pj *tss.PartyID) {
-			defer wg.Done()
-			r1msg := round.temp.signRound1Message1s[j].Content().(*SignRound1Message1)
-			rangeProofAliceJ, err := r1msg.UnmarshalRangeProofAlice()
-			if err != nil {
-				errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalRangeProofAlice failed"), Pj)
-				return
-			}
-			beta, c1ji, _, pi1ji, err := mta.BobMid(
-				ContextI,
-				round.Parameters.EC(),
-				round.key.PaillierPKs[j],
-				rangeProofAliceJ,
-				round.temp.gamma,
-				r1msg.UnmarshalC(),
-				round.key.NTildej[j],
-				round.key.H1j[j],
-				round.key.H2j[j],
-				round.key.NTildej[i],
-				round.key.H1j[i],
-				round.key.H2j[i],
-				round.Rand(),
-			)
-			// should be thread safe as these are pre-allocated
-			round.temp.betas[j] = beta
-			round.temp.c1jis[j] = c1ji
-			round.temp.pi1jis[j] = pi1ji
-			if err != nil {
-				errChs <- round.WrapError(err, Pj)
+		asynctask1 := func(j int, Pj *tss.PartyID) func() {
+			return func() {
+				defer wg.Done()
+				r1msg := round.temp.signRound1Message1s[j].Content().(*SignRound1Message1)
+				rangeProofAliceJ, err := r1msg.UnmarshalRangeProofAlice()
+				if err != nil {
+					errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalRangeProofAlice failed"), Pj)
+					return
+				}
+				beta, c1ji, _, pi1ji, err := mta.BobMid(
+					ContextI,
+					round.Parameters.EC(),
+					round.key.PaillierPKs[j],
+					rangeProofAliceJ,
+					round.temp.gamma,
+					r1msg.UnmarshalC(),
+					round.key.NTildej[j],
+					round.key.H1j[j],
+					round.key.H2j[j],
+					round.key.NTildej[i],
+					round.key.H1j[i],
+					round.key.H2j[i],
+					round.Rand(),
+				)
+				// should be thread safe as these are pre-allocated
+				round.temp.betas[j] = beta
+				round.temp.c1jis[j] = c1ji
+				round.temp.pi1jis[j] = pi1ji
+				if err != nil {
+					errChs <- round.WrapError(err, Pj)
+				}
 			}
 		}(j, Pj)
+		if err := round.runAsyncTask(asynctask1); err != nil {
+			return err
+		}
+
 		// Bob_mid_wc
-		go func(j int, Pj *tss.PartyID) {
-			defer wg.Done()
-			r1msg := round.temp.signRound1Message1s[j].Content().(*SignRound1Message1)
-			rangeProofAliceJ, err := r1msg.UnmarshalRangeProofAlice()
-			if err != nil {
-				errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalRangeProofAlice failed"), Pj)
-				return
-			}
-			v, c2ji, _, pi2ji, err := mta.BobMidWC(
-				ContextI,
-				round.Parameters.EC(),
-				round.key.PaillierPKs[j],
-				rangeProofAliceJ,
-				round.temp.w,
-				r1msg.UnmarshalC(),
-				round.key.NTildej[j],
-				round.key.H1j[j],
-				round.key.H2j[j],
-				round.key.NTildej[i],
-				round.key.H1j[i],
-				round.key.H2j[i],
-				round.temp.bigWs[i],
-				round.Rand(),
-			)
-			round.temp.vs[j] = v
-			round.temp.c2jis[j] = c2ji
-			round.temp.pi2jis[j] = pi2ji
-			if err != nil {
-				errChs <- round.WrapError(err, Pj)
+		asyncTask2 := func(j int, Pj *tss.PartyID) func() {
+			return func() {
+				defer wg.Done()
+				r1msg := round.temp.signRound1Message1s[j].Content().(*SignRound1Message1)
+				rangeProofAliceJ, err := r1msg.UnmarshalRangeProofAlice()
+				if err != nil {
+					errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalRangeProofAlice failed"), Pj)
+					return
+				}
+				v, c2ji, _, pi2ji, err := mta.BobMidWC(
+					ContextI,
+					round.Parameters.EC(),
+					round.key.PaillierPKs[j],
+					rangeProofAliceJ,
+					round.temp.w,
+					r1msg.UnmarshalC(),
+					round.key.NTildej[j],
+					round.key.H1j[j],
+					round.key.H2j[j],
+					round.key.NTildej[i],
+					round.key.H1j[i],
+					round.key.H2j[i],
+					round.temp.bigWs[i],
+					round.Rand(),
+				)
+				round.temp.vs[j] = v
+				round.temp.c2jis[j] = c2ji
+				round.temp.pi2jis[j] = pi2ji
+				if err != nil {
+					errChs <- round.WrapError(err, Pj)
+				}
 			}
 		}(j, Pj)
+		if err := round.runAsyncTask(asyncTask2); err != nil {
+			return err
+		}
 	}
+
 	// consume error channels; wait for goroutines
 	wg.Wait()
 	close(errChs)

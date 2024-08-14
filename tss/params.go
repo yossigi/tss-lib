@@ -34,7 +34,7 @@ type (
 
 		// can be used by rounds to perform work asynchronously
 		Context              context.Context
-		AsyncWorkComputation func(func())
+		AsyncWorkComputation func(func()) error // nil value means it'll spin a goroutine for any async task.
 	}
 
 	ReSharingParameters struct {
@@ -61,10 +61,6 @@ func NewParameters(ec elliptic.Curve, ctx *PeerContext, partyID *PartyID, partyC
 		safePrimeGenTimeout: defaultSafePrimeGenTimeout,
 		partialKeyRand:      rand.Reader,
 		rand:                rand.Reader,
-		// default is to spin a goroutine to process the given work.
-		AsyncWorkComputation: func(f func()) {
-			go f()
-		},
 	}
 }
 

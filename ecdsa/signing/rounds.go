@@ -147,12 +147,18 @@ func (round *base) sendMessage(msg tss.ParsedMessage) *tss.Error {
 	}
 }
 
-func (round *base) asyncRunTask(f func()) {
+// Attempts to run task asynchronly. if Params has a defined task-runner, will return whether it was successful or not.
+func (round *base) runAsyncTask(f func()) *tss.Error {
 	if round.Params() == nil || round.Params().AsyncWorkComputation == nil {
 		go f()
+		return nil
 	}
 
-	round.Params().AsyncWorkComputation(f)
+	if err := round.Params().AsyncWorkComputation(f); err != nil {
+		return round.WrapError(err)
+	}
+
+	return nil
 }
 
 // get ssid from local params

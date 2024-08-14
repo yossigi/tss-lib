@@ -196,12 +196,15 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	}
 
 	p.parameters.Context = p.ctx
-	p.parameters.AsyncWorkComputation = func(f func()) {
+	p.parameters.AsyncWorkComputation = func(f func()) error {
 		select {
 		case p.cryptoWorkChan <- f:
+			return nil
 		case <-p.ctx.Done():
+			return errors.New("context aborted")
 		}
 	}
+
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go p.cryptoWorker()
 	}
