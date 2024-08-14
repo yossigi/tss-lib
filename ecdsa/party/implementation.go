@@ -76,6 +76,7 @@ type Impl struct {
 	errorChannel           chan<- *tss.Error
 	outChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
+	cryptoWorkChan         chan func()
 	maxTTl                 time.Duration
 }
 
@@ -194,6 +195,17 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 		go p.worker()
 	}
 
+	p.parameters.Context = p.ctx
+	p.parameters.AsyncWorkComputation = func(f func()) {
+		select {
+		case p.cryptoWorkChan <- f:
+		case <-p.ctx.Done():
+		}
+	}
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go p.cryptoWorker()
+	}
+
 	go p.cleanupWorker()
 	if err := p.keygenHandler.setup(outChannel, p.partyID); err != nil {
 		p.Stop()
@@ -201,6 +213,17 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	}
 
 	return nil
+}
+
+func (p *Impl) cryptoWorker() {
+	for {
+		select {
+		case f := <-p.cryptoWorkChan:
+			f()
+		case <-p.ctx.Done():
+			return
+		}
+	}
 }
 
 func (p *Impl) Stop() {

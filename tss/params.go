@@ -7,6 +7,7 @@
 package tss
 
 import (
+	"context"
 	"crypto/elliptic"
 	"crypto/rand"
 	"io"
@@ -30,6 +31,10 @@ type (
 		noProofFac bool
 		// random sources
 		partialKeyRand, rand io.Reader
+
+		// can be used by rounds to perform work asynchronously
+		Context              context.Context
+		AsyncWorkComputation func(func())
 	}
 
 	ReSharingParameters struct {
@@ -56,6 +61,10 @@ func NewParameters(ec elliptic.Curve, ctx *PeerContext, partyID *PartyID, partyC
 		safePrimeGenTimeout: defaultSafePrimeGenTimeout,
 		partialKeyRand:      rand.Reader,
 		rand:                rand.Reader,
+		// default is to spin a goroutine to process the given work.
+		AsyncWorkComputation: func(f func()) {
+			go f()
+		},
 	}
 }
 
