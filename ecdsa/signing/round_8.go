@@ -22,9 +22,8 @@ func (round *round8) Start() *tss.Error {
 
 	r8msg := NewSignRound8Message(round.PartyID(), round.temp.DTelda, round.temp.m)
 	round.temp.signRound8Messages[round.PartyID().Index] = r8msg
-	round.out <- r8msg
 
-	return nil
+	return round.sendMessage(r8msg)
 }
 
 func (round *round8) Update() (bool, *tss.Error) {

@@ -37,8 +37,8 @@ func (round *round6) Start() *tss.Error {
 
 	r6msg := NewSignRound6Message(round.PartyID(), round.temp.DPower, piAi, piV, round.temp.m)
 	round.temp.signRound6Messages[round.PartyID().Index] = r6msg
-	round.out <- r6msg
-	return nil
+
+	return round.sendMessage(r6msg)
 }
 
 func (round *round6) Update() (bool, *tss.Error) {

@@ -86,7 +86,9 @@ func (round *round7) Start() *tss.Error {
 	cmt := commitments.NewHashCommitment(round.Rand(), UiX, UiY, TiX, TiY)
 	r7msg := NewSignRound7Message(round.PartyID(), cmt.C, round.temp.m)
 	round.temp.signRound7Messages[round.PartyID().Index] = r7msg
-	round.out <- r7msg
+	if err := round.sendMessage(r7msg); err != nil {
+		return err
+	}
 	round.temp.DTelda = cmt.D
 
 	return nil

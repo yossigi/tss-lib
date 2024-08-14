@@ -50,9 +50,8 @@ func (round *round4) Start() *tss.Error {
 	round.temp.thetaInverse = thetaInverse
 	r4msg := NewSignRound4Message(round.PartyID(), round.temp.deCommit, piGamma, round.temp.m)
 	round.temp.signRound4Messages[round.PartyID().Index] = r4msg
-	round.out <- r4msg
 
-	return nil
+	return round.sendMessage(r4msg)
 }
 
 func (round *round4) Update() (bool, *tss.Error) {

@@ -46,8 +46,8 @@ func (round *round9) Start() *tss.Error {
 
 	r9msg := NewSignRound9Message(round.PartyID(), round.temp.si, round.temp.m)
 	round.temp.signRound9Messages[round.PartyID().Index] = r9msg
-	round.out <- r9msg
-	return nil
+
+	return round.sendMessage(r9msg)
 }
 
 func (round *round9) Update() (bool, *tss.Error) {

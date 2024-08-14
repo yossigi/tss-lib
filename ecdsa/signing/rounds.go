@@ -126,6 +126,35 @@ func (round *base) resetOK() {
 	}
 }
 
+func (round *base) sendMessage(msg tss.ParsedMessage) *tss.Error {
+	if round.out == nil {
+		return round.WrapError(errors.New("received nil output channel"))
+	}
+	if round.Params() == nil {
+		return round.WrapError(errors.New("received nil Params"))
+	}
+
+	if round.Params().Context == nil {
+		round.out <- msg
+		return nil
+	}
+
+	select {
+	case round.out <- msg:
+		return nil
+	case <-round.Params().Context.Done():
+		return round.WrapError(errors.New("round aborted"))
+	}
+}
+
+func (round *base) asyncRunTask(f func()) {
+	if round.Params() == nil || round.Params().AsyncWorkComputation == nil {
+		go f()
+	}
+
+	round.Params().AsyncWorkComputation(f)
+}
+
 // get ssid from local params
 func (round *base) getSSID() ([]byte, error) {
 	ssidList := []*big.Int{round.EC().Params().P, round.EC().Params().N, round.EC().Params().B, round.EC().Params().Gx, round.EC().Params().Gy} // ec curve
