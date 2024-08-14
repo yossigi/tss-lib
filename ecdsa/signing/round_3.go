@@ -40,56 +40,66 @@ func (round *round3) Start() *tss.Error {
 		}
 		ContextJ := append(round.temp.ssid, new(big.Int).SetUint64(uint64(j)).Bytes()...)
 		// Alice_end
-		go func(j int, Pj *tss.PartyID) {
-			defer wg.Done()
-			r2msg := round.temp.signRound2Messages[j].Content().(*SignRound2Message)
-			proofBob, err := r2msg.UnmarshalProofBob()
-			if err != nil {
-				errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalProofBob failed"), Pj)
-				return
-			}
-			alphaIj, err := mta.AliceEnd(
-				ContextJ,
-				round.Params().EC(),
-				round.key.PaillierPKs[i],
-				proofBob,
-				round.key.H1j[i],
-				round.key.H2j[i],
-				round.temp.cis[j],
-				new(big.Int).SetBytes(r2msg.GetC1()),
-				round.key.NTildej[i],
-				round.key.PaillierSK)
-			alphas[j] = alphaIj
-			if err != nil {
-				errChs <- round.WrapError(err, Pj)
+		asynctask1 := func(j int, Pj *tss.PartyID) func() {
+			return func() {
+				defer wg.Done()
+				r2msg := round.temp.signRound2Messages[j].Content().(*SignRound2Message)
+				proofBob, err := r2msg.UnmarshalProofBob()
+				if err != nil {
+					errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalProofBob failed"), Pj)
+					return
+				}
+				alphaIj, err := mta.AliceEnd(
+					ContextJ,
+					round.Params().EC(),
+					round.key.PaillierPKs[i],
+					proofBob,
+					round.key.H1j[i],
+					round.key.H2j[i],
+					round.temp.cis[j],
+					new(big.Int).SetBytes(r2msg.GetC1()),
+					round.key.NTildej[i],
+					round.key.PaillierSK)
+				alphas[j] = alphaIj
+				if err != nil {
+					errChs <- round.WrapError(err, Pj)
+				}
 			}
 		}(j, Pj)
+		if err := round.runAsyncTask(asynctask1); err != nil {
+			return err
+		}
 		// Alice_end_wc
-		go func(j int, Pj *tss.PartyID) {
-			defer wg.Done()
-			r2msg := round.temp.signRound2Messages[j].Content().(*SignRound2Message)
-			proofBobWC, err := r2msg.UnmarshalProofBobWC(round.Parameters.EC())
-			if err != nil {
-				errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalProofBobWC failed"), Pj)
-				return
-			}
-			uIj, err := mta.AliceEndWC(
-				ContextJ,
-				round.Params().EC(),
-				round.key.PaillierPKs[i],
-				proofBobWC,
-				round.temp.bigWs[j],
-				round.temp.cis[j],
-				new(big.Int).SetBytes(r2msg.GetC2()),
-				round.key.NTildej[i],
-				round.key.H1j[i],
-				round.key.H2j[i],
-				round.key.PaillierSK)
-			us[j] = uIj
-			if err != nil {
-				errChs <- round.WrapError(err, Pj)
+		asynctask2 := func(j int, Pj *tss.PartyID) func() {
+			return func() {
+				defer wg.Done()
+				r2msg := round.temp.signRound2Messages[j].Content().(*SignRound2Message)
+				proofBobWC, err := r2msg.UnmarshalProofBobWC(round.Parameters.EC())
+				if err != nil {
+					errChs <- round.WrapError(errorspkg.Wrapf(err, "UnmarshalProofBobWC failed"), Pj)
+					return
+				}
+				uIj, err := mta.AliceEndWC(
+					ContextJ,
+					round.Params().EC(),
+					round.key.PaillierPKs[i],
+					proofBobWC,
+					round.temp.bigWs[j],
+					round.temp.cis[j],
+					new(big.Int).SetBytes(r2msg.GetC2()),
+					round.key.NTildej[i],
+					round.key.H1j[i],
+					round.key.H2j[i],
+					round.key.PaillierSK)
+				us[j] = uIj
+				if err != nil {
+					errChs <- round.WrapError(err, Pj)
+				}
 			}
 		}(j, Pj)
+		if err := round.runAsyncTask(asynctask2); err != nil {
+			return err
+		}
 	}
 
 	// consume error channels; wait for goroutines
