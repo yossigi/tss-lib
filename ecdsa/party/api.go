@@ -16,7 +16,7 @@ type Parameters struct {
 	// for simplicity of testing:
 	SavedSecrets *keygen.LocalPartySaveData
 
-	partyIDs []*tss.PartyID
+	PartyIDs []*tss.PartyID
 	Self     *tss.PartyID
 
 	Threshold int
@@ -57,21 +57,21 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	}
 
 	if !p.ensurePartiesContainsSelf() {
-		return nil, errors.New("self partyID not found in partyIDs list")
+		return nil, errors.New("self partyID not found in PartyIDs list")
 	}
 
 	if p.MaxSignerTTL == 0 {
 		p.MaxSignerTTL = signerMaxTTL
 	}
 
-	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.partyIDs))
+	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.PartyIDs))
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
 		ctx:         ctx,
 		cancelFunc:  cancelF,
 		partyID:     p.Self,
 		peerContext: pctx,
-		parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.partyIDs), p.Threshold),
+		parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.PartyIDs), p.Threshold),
 
 		keygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
@@ -88,7 +88,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 			sigPartReadyChan: nil, // set up during Start()
 		},
 
-		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.partyIDs)),
+		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.PartyIDs)),
 
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
@@ -100,7 +100,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 }
 
 func (p *Parameters) ensurePartiesContainsSelf() bool {
-	for _, party := range p.partyIDs {
+	for _, party := range p.PartyIDs {
 		if party.Id == p.Self.Id {
 			return true
 		}

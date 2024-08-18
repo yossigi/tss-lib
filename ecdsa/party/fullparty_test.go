@@ -460,7 +460,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 
 			ps[i] = Parameters{
 				SavedSecrets: kg.SavedData,
-				partyIDs:     sortedIds,
+				PartyIDs:     sortedIds,
 				Self:         sortedIds[i],
 				Threshold:    threshold,
 			}
@@ -476,7 +476,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 	for i := 0; i < len(signPIDs); i++ {
 		params := Parameters{
 			SavedSecrets: &keys[i],
-			partyIDs:     signPIDs,
+			PartyIDs:     signPIDs,
 			Self:         signPIDs[i],
 			Threshold:    threshold,
 			WorkDir:      "",
