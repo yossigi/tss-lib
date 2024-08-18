@@ -14,7 +14,7 @@ import (
 
 type Parameters struct {
 	// for simplicity of testing:
-	savedParams *keygen.LocalPartySaveData
+	SavedSecrets *keygen.LocalPartySaveData
 
 	partyIDs []*tss.PartyID
 	Self     *tss.PartyID
@@ -79,7 +79,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 			// to be set correctly during Start()
 			LocalParty: nil,
-			SavedData:  p.savedParams,
+			SavedData:  p.SavedSecrets,
 		},
 
 		signingHandler: &signingHandler{

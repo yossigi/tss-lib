@@ -459,10 +459,10 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 			sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
 
 			ps[i] = Parameters{
-				savedParams: kg.SavedData,
-				partyIDs:    sortedIds,
-				Self:        sortedIds[i],
-				Threshold:   threshold,
+				SavedSecrets: kg.SavedData,
+				partyIDs:     sortedIds,
+				Self:         sortedIds[i],
+				Threshold:    threshold,
 			}
 		}
 
@@ -475,11 +475,11 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 	ps := make([]Parameters, 0, len(signPIDs))
 	for i := 0; i < len(signPIDs); i++ {
 		params := Parameters{
-			savedParams: &keys[i],
-			partyIDs:    signPIDs,
-			Self:        signPIDs[i],
-			Threshold:   threshold,
-			WorkDir:     "",
+			SavedSecrets: &keys[i],
+			partyIDs:     signPIDs,
+			Self:         signPIDs[i],
+			Threshold:    threshold,
+			WorkDir:      "",
 		}
 		ps = append(ps, params)
 	}
