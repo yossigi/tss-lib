@@ -7,6 +7,7 @@ import (
 	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
 	"github.com/yossigi/tss-lib/v2/tss"
 	"golang.org/x/crypto/sha3"
+	"google.golang.org/protobuf/proto"
 )
 
 type protocolType int
@@ -85,7 +86,14 @@ func randomShuffle[T any](seed Digest, arr []T) error {
 
 func shuffleParties(seed Digest, parties []*tss.PartyID) ([]*tss.PartyID, error) {
 	cpy := make([]*tss.PartyID, len(parties))
-	copy(cpy, parties)
+	// deep copy:
+	for i, p := range parties {
+		pid := proto.Clone(p.MessageWrapper_PartyID).(*tss.MessageWrapper_PartyID)
+		cpy[i] = &tss.PartyID{
+			MessageWrapper_PartyID: pid,
+			Index:                  p.Index,
+		}
+	}
 
 	if err := randomShuffle(seed, cpy); err != nil {
 		return nil, err
