@@ -506,8 +506,14 @@ func createFullParties(a *assert.Assertions, participants, threshold int, locati
 
 func TestNoDupsInShuffle(t *testing.T) {
 	shuffleSize := 100
+	elems := make([]int, shuffleSize)
+	for i := 0; i < shuffleSize; i++ {
+		elems[i] = i
+	}
+	d := Digest{}
+	copy(d[:], crypto.Keccak256([]byte("hello, world")))
 
-	elems, err := generateRandomShuffleOfIndices(shuffleSize)
+	err := randomShuffle(d, elems)
 	require.NoError(t, err)
 	set := map[int]any{}
 	for _, e := range elems {

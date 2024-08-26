@@ -1,12 +1,12 @@
 package party
 
 import (
-	"crypto/rand"
-	"math/big"
+	"encoding/binary"
 
 	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
 	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
 	"github.com/yossigi/tss-lib/v2/tss"
+	"golang.org/x/crypto/sha3"
 )
 
 type protocolType int
@@ -30,30 +30,66 @@ func findProtocolType(message tss.ParsedMessage) protocolType {
 	}
 }
 
-func generateRandomShuffleOfIndices(n int) ([]int, error) {
-	// generate a random shuffle of indices
-	indices := make([]int, n)
-	for i := 0; i < n; i++ {
-		indices[i] = i
+type prng struct {
+	shake sha3.ShakeHash
+	buf   [8]byte
+}
+
+func newPrng(seed []byte) (*prng, error) {
+	shk := sha3.NewShake256()
+	_, err := shk.Write(seed)
+	if err != nil {
+		return nil, err
+	}
+	return &prng{shake: shk}, nil
+}
+
+func (p *prng) genUint64() (uint64, error) {
+	if _, err := p.shake.Read(p.buf[:]); err != nil {
+		return 0, err
 	}
 
-	res := make([]int, 0, n)
+	return binary.BigEndian.Uint64(p.buf[:]), nil
+}
 
-	// shuffle
-	for i := 0; i < n; i++ {
-		bigpos, err := rand.Int(rand.Reader, big.NewInt(int64(len(indices))))
+func (p *prng) modint(i uint64) (int, error) {
+	n, err := p.genUint64()
+	if err != nil {
+		return 0, err
+	}
+	// TODO: discuss with Yossi the following. the modint random isn't uniformly chosen.
+	//   but using prng isn't either. what does he think about it?
+
+	return int(n % i), nil
+}
+
+func randomShuffle[T any](seed Digest, arr []T) error {
+	rng, err := newPrng(seed[:])
+	if err != nil {
+		return err
+	}
+
+	n := len(arr)
+	// Fisher–Yates shuffle TODO: yossi should validate the following:
+	for i := n - 1; i >= 0; i-- {
+		j, err := rng.modint(uint64(i + 1))
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		pos := int(bigpos.Int64())
-		elem := indices[pos]
-
-		indices[pos] = indices[len(indices)-1]
-		indices = indices[:len(indices)-1]
-
-		res = append(res, elem)
+		arr[i], arr[j] = arr[j], arr[i]
 	}
 
-	return res, nil
+	return nil
+}
+
+func shuffleParties(seed Digest, parties []*tss.PartyID) ([]*tss.PartyID, error) {
+	cpy := make([]*tss.PartyID, len(parties))
+	copy(cpy, parties)
+
+	if err := randomShuffle(seed, cpy); err != nil {
+		return nil, err
+	}
+
+	return cpy, nil
 }
