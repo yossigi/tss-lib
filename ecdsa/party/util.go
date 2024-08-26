@@ -1,6 +1,9 @@
 package party
 
 import (
+	"crypto/rand"
+	"math/big"
+
 	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
 	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
 	"github.com/yossigi/tss-lib/v2/tss"
@@ -25,4 +28,32 @@ func findProtocolType(message tss.ParsedMessage) protocolType {
 	default: // unrecognised message, just ignore!
 		return unknownProtocolType
 	}
+}
+
+func generateRandomShuffleOfIndices(n int) ([]int, error) {
+	// generate a random shuffle of indices
+	indices := make([]int, n)
+	for i := 0; i < n; i++ {
+		indices[i] = i
+	}
+
+	res := make([]int, 0, n)
+
+	// shuffle
+	for i := 0; i < n; i++ {
+		bigpos, err := rand.Int(rand.Reader, big.NewInt(int64(len(indices))))
+		if err != nil {
+			return nil, err
+		}
+
+		pos := int(bigpos.Int64())
+		elem := indices[pos]
+
+		indices[pos] = indices[len(indices)-1]
+		indices = indices[:len(indices)-1]
+
+		res = append(res, elem)
+	}
+
+	return res, nil
 }
