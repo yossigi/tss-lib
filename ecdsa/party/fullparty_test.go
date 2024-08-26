@@ -59,12 +59,12 @@ func TestSigning(t *testing.T) {
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
 		keygenLocation:           largeFixturesLocation,
-		maxNetworkSimulationTime: time.Second * 50,
+		maxNetworkSimulationTime: time.Second * 200,
 	}
 	t.Run("one signature", st.run)
 
 	st.numSignatures = 5
-	st.maxNetworkSimulationTime = time.Second * 50
+	st.maxNetworkSimulationTime = time.Second * 200
 	t.Run("five signatures ", st.run)
 
 	st2 := signerTester{
@@ -102,26 +102,31 @@ func (st *signerTester) run(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+		Timeout:         st.maxNetworkSimulationTime,
 	}
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
 	}
 
+	for digest := range digestSet {
+
+		for _, party := range parties {
+			err := party.AsyncRequestNewSignature(digest)
+			if ErrNotInSigningCommittee == err {
+				continue
+			}
+
+			a.NoError(err)
+		}
+	}
+
+	time.Sleep(time.Second * 5)
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)
 		n.run(a)
 	}()
-
-	for digest := range digestSet {
-		go func(digest Digest) {
-			for _, party := range parties {
-				a.NoError(party.AsyncRequestNewSignature(digest))
-			}
-		}(digest)
-	}
 
 	fmt.Println("Setup done. test starting.")
 
@@ -450,7 +455,7 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 }
 
 func makeTestParameters(a *assert.Assertions, participants, threshold int, location string) []Parameters {
-	ps := make([]Parameters, threshold+1)
+	ps := make([]Parameters, participants)
 	sortedIds := make([]*tss.PartyID, len(ps))
 
 	for i := 0; i < len(ps); i++ {

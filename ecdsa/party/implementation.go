@@ -1,6 +1,7 @@
 package party
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
@@ -210,6 +211,10 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	signer, err := p.getSignerWithAuthorityToSign(digest)
 	if err != nil {
+		if err == ErrNotInSigningCommittee {
+			return nil
+		}
+
 		return err
 	}
 
@@ -295,6 +300,8 @@ func (signer *singleSigner) attemptToCacheIfUnauthorizedToSign(message tss.Parse
 	return
 }
 
+var ErrNotInSigningCommittee = errors.New("self not in signing committee")
+
 func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error {
 	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
@@ -305,9 +312,23 @@ func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error 
 	defer signer.mtx.Unlock()
 
 	if signer.localParty == nil {
+		// using digest as seed for shuffling parties.
+		parties, err := shuffleParties(digest, p.parameters.Parties().IDs())
+		if err != nil {
+			return err
+		}
+
+		parties = tss.SortPartyIDs(parties[:p.parameters.Threshold()+1])
+
+		selfIdInCurrentCommittee := p.selfInSigningCommittee(parties)
+		if selfIdInCurrentCommittee == nil {
+			return ErrNotInSigningCommittee
+		}
+
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			p.parameters,
+			// p.parameters,
+			tss.NewParameters(tss.S256(), tss.NewPeerContext(parties), selfIdInCurrentCommittee, len(parties), p.parameters.Threshold()),
 			*secrets,
 			p.outChan,
 			p.signatureOutputChannel,
@@ -374,4 +395,14 @@ func (p *Impl) reportError(newError *tss.Error) {
 	default:
 		// no one is waiting on error reporting channel/ no buffer.
 	}
+}
+
+func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
+	for _, party := range parties {
+		if party.Id == p.partyID.Id && bytes.Equal(party.Key, p.partyID.Key) && party.Moniker == p.partyID.Moniker {
+			return party
+		}
+	}
+
+	return nil
 }
