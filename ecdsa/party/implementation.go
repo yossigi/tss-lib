@@ -78,6 +78,7 @@ type Impl struct {
 	outChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
 	maxTTl                 time.Duration
+	partiesSharedSecret    []byte
 }
 
 func (p *Impl) cleanupWorker() {
@@ -312,8 +313,8 @@ func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error 
 	defer signer.mtx.Unlock()
 
 	if signer.localParty == nil {
-		// using digest as seed for shuffling parties.
-		parties, err := shuffleParties(digest, p.parameters.Parties().IDs())
+		randomnessSeed := append(p.partiesSharedSecret, digest[:]...)
+		parties, err := shuffleParties(randomnessSeed, p.parameters.Parties().IDs())
 		if err != nil {
 			return err
 		}

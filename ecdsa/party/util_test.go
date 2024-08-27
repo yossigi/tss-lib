@@ -21,8 +21,8 @@ func TestNoDupsInShuffle(t *testing.T) {
 	for i := 0; i < shuffleSize; i++ {
 		elems[i] = i
 	}
-	d := Digest{}
-	copy(d[:], crypto.Keccak256([]byte("hello, world")))
+
+	d := crypto.Keccak256([]byte("hello, world"))
 
 	err := randomShuffle(d, elems)
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestShuffleLoadBalances(t *testing.T) {
 
 	counters := make([]float64, shuffleSize)
 
-	d := Digest{}
+	d := make([]byte, 8)
 	for i := 0; i < numAttempts; i++ {
 		binary.BigEndian.PutUint64(d[:], uint64(i))
 

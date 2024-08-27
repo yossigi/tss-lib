@@ -62,8 +62,8 @@ func (p *prng) modint(i uint64) (int, error) {
 	return int(n % i), nil
 }
 
-func randomShuffle[T any](seed Digest, arr []T) error {
-	rng, err := newPrng(seed[:])
+func randomShuffle[T any](seed []byte, arr []T) error {
+	rng, err := newPrng(seed)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func randomShuffle[T any](seed Digest, arr []T) error {
 	return nil
 }
 
-func shuffleParties(seed Digest, parties []*tss.PartyID) ([]*tss.PartyID, error) {
+func shuffleParties(seed []byte, parties []*tss.PartyID) ([]*tss.PartyID, error) {
 	cpy := make([]*tss.PartyID, len(parties))
 	// deep copy:
 	for i, p := range parties {

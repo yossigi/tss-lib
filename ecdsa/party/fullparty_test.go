@@ -470,6 +470,9 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 			PartyIDs:     sortedIds,
 			Self:         sortedIds[i],
 			Threshold:    threshold,
+			WorkDir:      "",  // using SavedSecrets - no need to concern with workDir.
+			MaxSignerTTL: 0,   // letting it pick default.
+			SharedSecret: nil, // using nil shared secret.
 		}
 	}
 
