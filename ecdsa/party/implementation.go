@@ -212,7 +212,7 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	signer, err := p.getSignerWithAuthorityToSign(digest)
 	if err != nil {
-		if err == ErrNotInSigningCommittee {
+		if errors.Is(err, ErrNotInSigningCommittee) {
 			return nil
 		}
 
@@ -243,24 +243,23 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 
 }
 
-// The signer isn't necessarily authorised to sign yet. as a result, we might return a nil signer - to ensure
+// The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
 // we don't sign messages blindly.
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
 
-	authorised := signer.attemptToCacheIfUnauthorizedToSign(message)
-	if !authorised {
+	shouldSign := signer.attemptToCacheIfShouldntSign(message)
+	if !shouldSign {
 		return nil, nil
 	}
 
-	// signer is authorised to sign since it declined caching the message.
 	return signer, signer.ensureStarted()
 }
 
 func (p *Impl) getSignerWithAuthorityToSign(digest Digest) (*singleSigner, error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(digest[:]))
 
-	if err := p.authoriseSignerToSign(digest, signer); err != nil {
+	if err := p.tryStartSigning(digest, signer); err != nil {
 		return nil, err
 	}
 
@@ -284,12 +283,12 @@ func (signer *singleSigner) ensureStarted() *tss.Error {
 
 // Since storing to cache is done strictly when this signer had not yet received authority to sign, this
 // method will return a bool indicating whether it is allowed to sign.
-func (signer *singleSigner) attemptToCacheIfUnauthorizedToSign(message tss.ParsedMessage) (authorisedToSign bool) {
+func (signer *singleSigner) attemptToCacheIfShouldntSign(message tss.ParsedMessage) (shouldSign bool) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
 	if signer.localParty != nil {
-		authorisedToSign = true
+		shouldSign = true
 		return
 	}
 
@@ -302,11 +301,14 @@ func (signer *singleSigner) attemptToCacheIfUnauthorizedToSign(message tss.Parse
 }
 
 var ErrNotInSigningCommittee = errors.New("self not in signing committee")
+var ErrNoSigningKey = errors.New("no key to sign with")
 
-func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error {
+// tryStartSigning attempts to start the signing protocol for the given digest (set signer.localParty).
+// It can fail if the party isn't in the signing committee, or if there's no key to sign with.
+func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
-		return errors.New("no key to sign with")
+		return ErrNoSigningKey
 	}
 
 	signer.mtx.Lock()
@@ -328,7 +330,6 @@ func (p *Impl) authoriseSignerToSign(digest Digest, signer *singleSigner) error 
 
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			// p.parameters,
 			tss.NewParameters(tss.S256(), tss.NewPeerContext(parties), selfIdInCurrentCommittee, len(parties), p.parameters.Threshold()),
 			*secrets,
 			p.outChan,
