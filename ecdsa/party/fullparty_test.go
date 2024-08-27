@@ -466,13 +466,13 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int, locat
 		sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
 
 		ps[i] = Parameters{
-			SavedSecrets: kg.SavedData,
-			PartyIDs:     sortedIds,
-			Self:         sortedIds[i],
-			Threshold:    threshold,
-			WorkDir:      "",  // using SavedSecrets - no need to concern with workDir.
-			MaxSignerTTL: 0,   // letting it pick default.
-			SharedSecret: nil, // using nil shared secret.
+			SavedSecrets:         kg.SavedData,
+			PartyIDs:             sortedIds,
+			Self:                 sortedIds[i],
+			Threshold:            threshold,
+			WorkDir:              "",  // using SavedSecrets - no need to concern with workDir.
+			MaxSignerTTL:         0,   // letting it pick default.
+			LoadDistributionSeed: nil, // using nil shared secret.
 		}
 	}
 
