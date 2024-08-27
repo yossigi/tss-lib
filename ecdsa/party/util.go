@@ -58,9 +58,7 @@ func (p *prng) modint(i uint64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// TODO: discuss with Yossi the following. the modint random isn't uniformly chosen.
-	//   but using prng isn't either. what does he think about it?
-
+	// since n is relatively small (compared to uint64), we can ignore the modulo bias.
 	return int(n % i), nil
 }
 
@@ -71,7 +69,7 @@ func randomShuffle[T any](seed Digest, arr []T) error {
 	}
 
 	n := len(arr)
-	// Fisher–Yates shuffle TODO: yossi should validate the following:
+	// Fisher–Yates shuffle
 	for i := n - 1; i >= 0; i-- {
 		j, err := rng.modint(uint64(i + 1))
 		if err != nil {

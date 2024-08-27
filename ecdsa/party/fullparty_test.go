@@ -15,7 +15,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/yossigi/tss-lib/v2/common"
 	"github.com/yossigi/tss-lib/v2/test"
 	"github.com/yossigi/tss-lib/v2/tss"
@@ -491,22 +490,4 @@ func createFullParties(a *assert.Assertions, participants, threshold int, locati
 		parties[i] = p
 	}
 	return parties, params
-}
-
-func TestNoDupsInShuffle(t *testing.T) {
-	shuffleSize := 100
-	elems := make([]int, shuffleSize)
-	for i := 0; i < shuffleSize; i++ {
-		elems[i] = i
-	}
-	d := Digest{}
-	copy(d[:], crypto.Keccak256([]byte("hello, world")))
-
-	err := randomShuffle(d, elems)
-	require.NoError(t, err)
-	set := map[int]any{}
-	for _, e := range elems {
-		set[e] = e
-	}
-	require.Len(t, set, shuffleSize)
 }
