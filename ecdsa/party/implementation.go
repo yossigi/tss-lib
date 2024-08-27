@@ -46,6 +46,9 @@ type singleSigner struct {
 	localParty tss.Party
 	once       sync.Once
 	mtx        sync.Mutex
+
+	// sets to true if is authorised to sign, but not in the signing committee.
+	notInCommittee bool
 }
 
 // signingHandler handles all signers in the FullParty.
@@ -287,6 +290,11 @@ func (signer *singleSigner) attemptToCacheIfShouldntSign(message tss.ParsedMessa
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	if signer.notInCommittee {
+		signer.messageBuffer = nil
+		return
+	}
+
 	if signer.localParty != nil {
 		shouldSign = true
 		return
@@ -325,6 +333,8 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 		selfIdInCurrentCommittee := p.selfInSigningCommittee(parties)
 		if selfIdInCurrentCommittee == nil {
+			signer.notInCommittee = true
+
 			return ErrNotInSigningCommittee
 		}
 
