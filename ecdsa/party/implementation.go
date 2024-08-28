@@ -31,6 +31,14 @@ type KeygenHandler struct {
 
 type partyIdIndex int
 
+type signerState int
+
+const (
+	notStarted signerState = iota
+	started
+	startedNotInCommittee
+)
+
 type singleSigner struct {
 	// time represents the moment this signleSigner is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
@@ -47,8 +55,8 @@ type singleSigner struct {
 	once       sync.Once
 	mtx        sync.Mutex
 
-	// sets to true if is authorised to sign, but not in the signing committee.
-	notInCommittee bool
+	// the state of the signer. can be one of { notStarted, started, startedNotInCommittee }.
+	state signerState
 }
 
 // signingHandler handles all signers in the FullParty.
@@ -61,9 +69,7 @@ type signingHandler struct {
 	sigPartReadyChan chan *common.SignatureData
 }
 
-// Impl handles multiple signers, and ensures only signers that are authorised to sign
-// (their digest was requested to be signed via AsyncRequestNewSignature)
-// are updated with incoming messages.
+// Impl handles multiple signers
 type Impl struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -95,6 +101,7 @@ func (p *Impl) cleanupWorker() {
 		}
 	}
 }
+
 func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	nmap := make(map[string]*singleSigner)
 	s.mtx.Lock()
@@ -213,7 +220,7 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
-	signer, err := p.getSignerWithAuthorityToSign(digest)
+	signer, err := p.getStartedSigner(digest)
 	if err != nil {
 		if errors.Is(err, ErrNotInSigningCommittee) {
 			return nil
@@ -251,7 +258,7 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
 
-	shouldSign := signer.attemptToCacheIfShouldntSign(message)
+	shouldSign := signer.attemptToCacheIfShouldNotSign(message)
 	if !shouldSign {
 		return nil, nil
 	}
@@ -259,7 +266,7 @@ func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner
 	return signer, signer.ensureStarted()
 }
 
-func (p *Impl) getSignerWithAuthorityToSign(digest Digest) (*singleSigner, error) {
+func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
 	signer := p.signingHandler.getOrCreateSingleSigner(string(digest[:]))
 
 	if err := p.tryStartSigning(digest, signer); err != nil {
@@ -284,25 +291,24 @@ func (signer *singleSigner) ensureStarted() *tss.Error {
 	return e
 }
 
-// Since storing to cache is done strictly when this signer had not yet received authority to sign, this
+// Since storing to cache is done strictly when this signer had not yet started to sign, this
 // method will return a bool indicating whether it is allowed to sign.
-func (signer *singleSigner) attemptToCacheIfShouldntSign(message tss.ParsedMessage) (shouldSign bool) {
+func (signer *singleSigner) attemptToCacheIfShouldNotSign(message tss.ParsedMessage) (shouldSign bool) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	if signer.notInCommittee {
-		signer.messageBuffer = nil
-		return
-	}
+	switch signer.state {
+	case notStarted:
+		pindex := partyIdIndex(message.GetFrom().Index)
+		if len(signer.messageBuffer[pindex]) < maxStoragePerParty {
+			signer.messageBuffer[pindex] = append(signer.messageBuffer[pindex], message)
+		}
 
-	if signer.localParty != nil {
+	case started:
 		shouldSign = true
-		return
-	}
 
-	pindex := partyIdIndex(message.GetFrom().Index)
-	if len(signer.messageBuffer[pindex]) < maxStoragePerParty {
-		signer.messageBuffer[pindex] = append(signer.messageBuffer[pindex], message)
+	case startedNotInCommittee:
+		signer.messageBuffer = nil // ensuring no messages are stored.
 	}
 
 	return
@@ -322,7 +328,13 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	if signer.localParty == nil {
+	switch signer.state {
+	case started:
+		return nil
+	case startedNotInCommittee:
+		return ErrNotInSigningCommittee
+
+	case notStarted:
 		randomnessSeed := append(p.loadDistributionSeed, digest[:]...)
 		parties, err := shuffleParties(randomnessSeed, p.parameters.Parties().IDs())
 		if err != nil {
@@ -333,7 +345,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 		selfIdInCurrentCommittee := p.selfInSigningCommittee(parties)
 		if selfIdInCurrentCommittee == nil {
-			signer.notInCommittee = true
+			signer.state = startedNotInCommittee
 
 			return ErrNotInSigningCommittee
 		}
@@ -345,6 +357,8 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 			p.outChan,
 			p.signatureOutputChannel,
 		)
+
+		signer.state = started
 	}
 
 	return nil
@@ -364,6 +378,7 @@ func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner
 			localParty:    nil,
 			once:          sync.Once{},
 			mtx:           sync.Mutex{},
+			state:         notStarted,
 		}
 
 		signer = s.digestToSigner[digestStr]
@@ -411,7 +426,8 @@ func (p *Impl) reportError(newError *tss.Error) {
 
 func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
 	for _, party := range parties {
-		if party.Id == p.partyID.Id && bytes.Equal(party.Key, p.partyID.Key) && party.Moniker == p.partyID.Moniker {
+		// not checking moniker since it's for convenience only.
+		if party.Id == p.partyID.Id && bytes.Equal(party.Key, p.partyID.Key) {
 			return party
 		}
 	}

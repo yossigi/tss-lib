@@ -60,11 +60,6 @@ func TestShuffleLoadBalances(t *testing.T) {
 		copy(elems, orderd)
 	}
 
-	for i, counter := range counters {
-		// div by numAttempts to get the average of the number of times each element was in the first cutoff elements.
-		counters[i] = counter
-	}
-
 	// mean of everything  should be ~ 1/shuffleSize*cutout
 	_var, _mean := variance(counters)
 	standarddiv := math.Sqrt(_var)
