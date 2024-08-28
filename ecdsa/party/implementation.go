@@ -35,8 +35,8 @@ type signerState int
 
 const (
 	notStarted signerState = iota
+	notInCommittee
 	started
-	startedNotInCommittee
 )
 
 type singleSigner struct {
@@ -55,7 +55,7 @@ type singleSigner struct {
 	once       sync.Once
 	mtx        sync.Mutex
 
-	// the state of the signer. can be one of { notStarted, started, startedNotInCommittee }.
+	// the state of the signer. can be one of { notStarted, started, notInCommittee }.
 	state signerState
 }
 
@@ -307,7 +307,7 @@ func (signer *singleSigner) attemptToCacheIfShouldNotSign(message tss.ParsedMess
 	case started:
 		shouldSign = true
 
-	case startedNotInCommittee:
+	case notInCommittee:
 		signer.messageBuffer = nil // ensuring no messages are stored.
 	}
 
@@ -331,7 +331,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 	switch signer.state {
 	case started:
 		return nil
-	case startedNotInCommittee:
+	case notInCommittee:
 		return ErrNotInSigningCommittee
 
 	case notStarted:
@@ -345,7 +345,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 		selfIdInCurrentCommittee := p.selfInSigningCommittee(parties)
 		if selfIdInCurrentCommittee == nil {
-			signer.state = startedNotInCommittee
+			signer.state = notInCommittee
 
 			return ErrNotInSigningCommittee
 		}
