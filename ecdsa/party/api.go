@@ -23,6 +23,14 @@ type Parameters struct {
 
 	WorkDir      string
 	MaxSignerTTL time.Duration
+
+	// LoadDistributionSeed doesn't affect the security of the protocol. Instead, it is used to ensure malicious clients
+	// can't target the load-balancing mechanisms of FullParty.
+	// The secret can be nil or some random bytes shared across all guardians.
+	//
+	// NOTE: giving each guardian a different value will affect the protocol and might lead to never-ending
+	// signature processes.
+	LoadDistributionSeed []byte
 }
 
 type Digest [32]byte
@@ -95,6 +103,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		outChan:                nil,
 		signatureOutputChannel: nil,
 		maxTTl:                 p.MaxSignerTTL,
+
+		loadDistributionSeed: p.LoadDistributionSeed,
 	}
 	return imp, nil
 }

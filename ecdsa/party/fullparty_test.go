@@ -16,9 +16,13 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
 	"github.com/yossigi/tss-lib/v2/test"
 	"github.com/yossigi/tss-lib/v2/tss"
+)
+
+var (
+	smallFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_quick")
+	largeFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_fixtures")
 )
 
 func getProjectRootDir() string {
@@ -53,13 +57,13 @@ func TestSigning(t *testing.T) {
 		participants:             test.TestParticipants,
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
-		keygenLocation:           "",
-		maxNetworkSimulationTime: time.Second * 50,
+		keygenLocation:           largeFixturesLocation,
+		maxNetworkSimulationTime: time.Second * 200,
 	}
 	t.Run("one signature", st.run)
 
 	st.numSignatures = 5
-	st.maxNetworkSimulationTime = time.Second * 50
+	st.maxNetworkSimulationTime = time.Second * 200
 	t.Run("five signatures ", st.run)
 
 	st2 := signerTester{
@@ -97,26 +101,31 @@ func (st *signerTester) run(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+		Timeout:         st.maxNetworkSimulationTime,
 	}
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
 	}
 
+	for digest := range digestSet {
+
+		for _, party := range parties {
+			err := party.AsyncRequestNewSignature(digest)
+			if ErrNotInSigningCommittee == err {
+				continue
+			}
+
+			a.NoError(err)
+		}
+	}
+
+	time.Sleep(time.Second * 5)
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)
 		n.run(a)
 	}()
-
-	for digest := range digestSet {
-		go func(digest Digest) {
-			for _, party := range parties {
-				a.NoError(party.AsyncRequestNewSignature(digest))
-			}
-		}(digest)
-	}
 
 	fmt.Println("Setup done. test starting.")
 
@@ -135,7 +144,7 @@ Test to ensure that a Part will not attempt to sign a digest, even if received m
 func TestPartyDoesntFollowRouge(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
 	digestSet := make(map[Digest]bool)
 	d := crypto.Keccak256([]byte("hello, world"))
@@ -186,7 +195,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 func TestMultipleRequestToSignSameThing(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, 5, 3, path.Join(getProjectRootDir(), "test", "_ecdsa_quick"))
+	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
 
 	digestSet := make(map[Digest]bool)
 	for i := 0; i < 1; i++ {
@@ -246,7 +255,7 @@ func TestLateParties(t *testing.T) {
 func testLateParties(t *testing.T, numLate int) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
 	digestSet := make(map[Digest]bool)
 	d := crypto.Keccak256([]byte("hello, world"))
@@ -302,7 +311,7 @@ func testLateParties(t *testing.T, numLate int) {
 func TestCleanup(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 	maxTTL := time.Second * 1
 	for _, impl := range parties {
 		impl.(*Impl).maxTTl = maxTTL
@@ -445,54 +454,37 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 }
 
 func makeTestParameters(a *assert.Assertions, participants, threshold int, location string) []Parameters {
+	ps := make([]Parameters, participants)
+	sortedIds := make([]*tss.PartyID, len(ps))
 
-	if location != "" {
-		ps := make([]Parameters, threshold+1)
-		sortedIds := make([]*tss.PartyID, len(ps))
-
-		for i := 0; i < len(ps); i++ {
-			kg := KeygenHandler{
-				StoragePath: location,
-			}
-			a.NoError(kg.setup(nil, &tss.PartyID{Index: i}))
-			key := kg.SavedData.Ks[i]
-			sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
-
-			ps[i] = Parameters{
-				SavedSecrets: kg.SavedData,
-				PartyIDs:     sortedIds,
-				Self:         sortedIds[i],
-				Threshold:    threshold,
-			}
+	for i := 0; i < len(ps); i++ {
+		kg := KeygenHandler{
+			StoragePath: location,
 		}
+		a.NoError(kg.setup(nil, &tss.PartyID{Index: i}))
+		key := kg.SavedData.Ks[i]
+		sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
 
-		return ps
-	}
-
-	keys, signPIDs, err := keygen.LoadKeygenTestFixturesRandomSet(threshold+1, participants)
-	a.NoError(err, "should load keygen fixtures")
-
-	ps := make([]Parameters, 0, len(signPIDs))
-	for i := 0; i < len(signPIDs); i++ {
-		params := Parameters{
-			SavedSecrets: &keys[i],
-			PartyIDs:     signPIDs,
-			Self:         signPIDs[i],
-			Threshold:    threshold,
-			WorkDir:      "",
+		ps[i] = Parameters{
+			SavedSecrets:         kg.SavedData,
+			PartyIDs:             sortedIds,
+			Self:                 sortedIds[i],
+			Threshold:            threshold,
+			WorkDir:              "",  // using SavedSecrets - no need to concern with workDir.
+			MaxSignerTTL:         0,   // letting it pick default.
+			LoadDistributionSeed: nil, // using nil shared secret.
 		}
-		ps = append(ps, params)
 	}
 
 	return ps
 }
 
-func createFullParties(a *assert.Assertions, participants, threshold int, location ...string) ([]FullParty, []Parameters) {
-	lc := ""
-	if len(location) > 0 {
-		lc = location[0]
+func createFullParties(a *assert.Assertions, participants, threshold int, location string) ([]FullParty, []Parameters) {
+	if location == "" {
+		panic("location must be set")
 	}
-	params := makeTestParameters(a, participants, threshold, lc)
+
+	params := makeTestParameters(a, participants, threshold, location)
 	parties := make([]FullParty, len(params))
 
 	for i := range params {
