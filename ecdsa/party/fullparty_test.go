@@ -393,7 +393,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 
 		// simulating the network:
 		case newMsg := <-n.outchan:
-			passMsg(a, newMsg, n.idToFullParty)
+			passMsg(a, newMsg, n.idToFullParty, n.expectErr)
 
 		case m := <-n.sigchan:
 			d := Digest{}
@@ -428,12 +428,18 @@ func validateSignature(pk *ecdsa.PublicKey, m *common.SignatureData, digest []by
 
 }
 
-func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty) {
+func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty, expectErr bool) {
 	bz, routing, err := newMsg.WireBytes()
+	if expectErr && err != nil {
+		return
+	}
 	a.NoError(err)
 	// parsedMsg doesn't contain routing, since it assumes this message arrive for this participant from outside.
 	// as a result we'll use the routing of the wireByte msgs.
 	parsedMsg, err := tss.ParseWireMessage(bz, routing.From, routing.IsBroadcast)
+	if expectErr && err != nil {
+		return
+	}
 	a.NoError(err)
 
 	if routing.IsBroadcast || routing.To == nil {
@@ -441,14 +447,22 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 			if routing.From.GetId() == pID {
 				continue
 			}
-			a.NoError(p.Update(parsedMsg))
+			err = p.Update(parsedMsg)
+			if expectErr && err != nil {
+				continue
+			}
+			a.NoError(err)
 		}
 
 		return
 	}
 
 	for _, id := range routing.To {
-		a.NoError(idToParty[id.Id].Update(parsedMsg))
+		err = idToParty[id.Id].Update(parsedMsg)
+		if expectErr && err != nil {
+			continue
+		}
+		a.NoError(err)
 	}
 }
 
@@ -511,10 +525,10 @@ func createFullParties(a *assert.Assertions, participants, threshold int, locati
 	return parties, params
 }
 
-func TestClosingThreadpool(t *testing.T) {
+func TestClosingThreadpoolMidRun(t *testing.T) {
+	// This test Fails when not run in isolation.
 	a := assert.New(t)
 
-	goroutinesstart := runtime.NumGoroutine()
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
 	digestSet := make(map[Digest]bool)
@@ -532,6 +546,8 @@ func TestClosingThreadpool(t *testing.T) {
 		Timeout:         time.Second * 3,
 		expectErr:       true,
 	}
+
+	goroutinesstart := runtime.NumGoroutine()
 
 	chanReceivedAsyncTask := make(chan struct{})
 	barrier := make(chan struct{})
@@ -557,9 +573,11 @@ func TestClosingThreadpool(t *testing.T) {
 		}
 	}
 
-	goroutinesFullThreadpools := runtime.NumGoroutine()
-	a.Greater(goroutinesFullThreadpools, goroutinesstart, "expected more goroutines")
-
+	a.Equal(
+		len(parties)*(runtime.NumCPU()*2+1)+goroutinesstart,
+		runtime.NumGoroutine(),
+		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
+	)
 	for i := 0; i < len(parties); i++ {
 		a.NoError(parties[i].AsyncRequestNewSignature(hash))
 	}
@@ -570,7 +588,7 @@ func TestClosingThreadpool(t *testing.T) {
 		n.run(a)
 	}()
 
-	//stopping everyone to close the threadpools.
+	// stopping everyone to close the threadpools.
 	<-chanReceivedAsyncTask
 	for _, party := range parties {
 		party.Stop()
