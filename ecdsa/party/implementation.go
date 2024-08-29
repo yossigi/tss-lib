@@ -382,7 +382,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			tss.NewParameters(tss.S256(), tss.NewPeerContext(parties), selfIdInCurrentCommittee, len(parties), p.parameters.Threshold()),
+			p.makeParams(parties, selfIdInCurrentCommittee),
 			*secrets,
 			p.outChan,
 			p.signatureOutputChannel,
@@ -392,6 +392,14 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 	}
 
 	return nil
+}
+
+// since the parties and committee are shuffled we need to create specialized parameters for the signing protocol.
+func (p *Impl) makeParams(parties []*tss.PartyID, selfIdInCurrentCommittee *tss.PartyID) *tss.Parameters {
+	prms := tss.NewParameters(tss.S256(), tss.NewPeerContext(parties), selfIdInCurrentCommittee, len(parties), p.parameters.Threshold())
+	prms.Context = p.parameters.Context
+	prms.AsyncWorkComputation = p.parameters.AsyncWorkComputation
+	return prms
 }
 
 // getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.

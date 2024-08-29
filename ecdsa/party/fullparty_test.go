@@ -521,7 +521,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	// This test Fails when not run in isolation.
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
 	digestSet := make(map[Digest]bool)
 	d := crypto.Keccak256([]byte("hello, world"))
@@ -535,7 +535,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 3,
+		Timeout:         time.Second * 8,
 		expectErr:       true,
 	}
 
@@ -570,6 +570,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 		runtime.NumGoroutine(),
 		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
 	)
+
 	for i := 0; i < len(parties); i++ {
 		a.NoError(parties[i].AsyncRequestNewSignature(hash))
 	}
