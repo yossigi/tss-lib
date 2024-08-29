@@ -7,6 +7,7 @@
 package tss
 
 import (
+	"context"
 	"crypto/elliptic"
 	"crypto/rand"
 	"io"
@@ -30,6 +31,10 @@ type (
 		noProofFac bool
 		// random sources
 		partialKeyRand, rand io.Reader
+
+		// can be used by rounds to perform work asynchronously
+		Context              context.Context
+		AsyncWorkComputation func(func()) error // nil value means it'll spin a goroutine for any async task.
 	}
 
 	ReSharingParameters struct {

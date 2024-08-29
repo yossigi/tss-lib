@@ -74,14 +74,16 @@ func (round *round1) Start() *tss.Error {
 		}
 		r1msg1 := NewSignRound1Message1(Pj, round.PartyID(), cA, pi, round.temp.m)
 		round.temp.cis[j] = cA
-		round.out <- r1msg1
+
+		if err := round.sendMessage(r1msg1); err != nil {
+			return err
+		}
 	}
 
 	r1msg2 := NewSignRound1Message2(round.PartyID(), cmt.C, round.temp.m)
 	round.temp.signRound1Message2s[i] = r1msg2
-	round.out <- r1msg2
 
-	return nil
+	return round.sendMessage(r1msg2)
 }
 
 func (round *round1) Update() (bool, *tss.Error) {

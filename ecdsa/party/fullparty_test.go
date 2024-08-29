@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -351,6 +352,8 @@ type networkSimulator struct {
 	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
 
 	Timeout time.Duration // 0 means no timeout
+	// used to wait for errors
+	expectErr bool
 }
 
 func (n *networkSimulator) verifiedAllSignatures() bool {
@@ -373,12 +376,12 @@ func idToParty(parties []FullParty) map[string]FullParty {
 }
 
 func (n *networkSimulator) run(a *assert.Assertions) {
-
 	var anyParty FullParty
 	for _, p := range n.idToFullParty {
 		anyParty = p
 		break
 	}
+
 	a.NotNil(anyParty)
 
 	after := time.After(n.Timeout)
@@ -389,12 +392,17 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 	for {
 		select {
 		case err := <-n.errchan:
+			if n.expectErr {
+				fmt.Println("Received expected error:", err)
+				return
+			}
+
 			a.NoError(err)
 			a.FailNow("unexpected error")
 
 		// simulating the network:
 		case newMsg := <-n.outchan:
-			passMsg(a, newMsg, n.idToFullParty)
+			passMsg(a, newMsg, n.idToFullParty, n.expectErr)
 
 		case m := <-n.sigchan:
 			d := Digest{}
@@ -429,12 +437,18 @@ func validateSignature(pk *ecdsa.PublicKey, m *common.SignatureData, digest []by
 
 }
 
-func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty) {
+func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty, expectErr bool) {
 	bz, routing, err := newMsg.WireBytes()
+	if expectErr && err != nil {
+		return
+	}
 	a.NoError(err)
 	// parsedMsg doesn't contain routing, since it assumes this message arrive for this participant from outside.
 	// as a result we'll use the routing of the wireByte msgs.
 	parsedMsg, err := tss.ParseWireMessage(bz, routing.From, routing.IsBroadcast)
+	if expectErr && err != nil {
+		return
+	}
 	a.NoError(err)
 
 	if routing.IsBroadcast || routing.To == nil {
@@ -442,14 +456,22 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 			if routing.From.GetId() == pID {
 				continue
 			}
-			a.NoError(p.Update(parsedMsg))
+			err = p.Update(parsedMsg)
+			if expectErr && err != nil {
+				continue
+			}
+			a.NoError(err)
 		}
 
 		return
 	}
 
 	for _, id := range routing.To {
-		a.NoError(idToParty[id.Id].Update(parsedMsg))
+		err = idToParty[id.Id].Update(parsedMsg)
+		if expectErr && err != nil {
+			continue
+		}
+		a.NoError(err)
 	}
 }
 
@@ -493,4 +515,81 @@ func createFullParties(a *assert.Assertions, participants, threshold int, locati
 		parties[i] = p
 	}
 	return parties, params
+}
+
+func TestClosingThreadpoolMidRun(t *testing.T) {
+	// This test Fails when not run in isolation.
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	digestSet := make(map[Digest]bool)
+	d := crypto.Keccak256([]byte("hello, world"))
+	hash := Digest{}
+	copy(hash[:], d)
+	digestSet[hash] = false
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 3,
+		expectErr:       true,
+	}
+
+	goroutinesstart := runtime.NumGoroutine()
+
+	chanReceivedAsyncTask := make(chan struct{})
+	barrier := make(chan struct{})
+	var visitedFlag int32 = 0
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+
+		tmp, ok := p.(*Impl)
+		a.True(ok)
+
+		fnc := tmp.parameters.AsyncWorkComputation
+		// setting different AsyncWorkComputation to test closing the threadpool
+		tmp.parameters.AsyncWorkComputation = func(f func()) error {
+			select {
+			// signaling we reached an async function
+			case chanReceivedAsyncTask <- struct{}{}:
+			default:
+			}
+
+			<-barrier
+			atomic.AddInt32(&visitedFlag, 1)
+			return fnc(f)
+		}
+	}
+
+	a.Equal(
+		len(parties)*(runtime.NumCPU()*2+1)+goroutinesstart,
+		runtime.NumGoroutine(),
+		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
+	)
+	for i := 0; i < len(parties); i++ {
+		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+	}
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	// stopping everyone to close the threadpools.
+	<-chanReceivedAsyncTask
+	for _, party := range parties {
+		party.Stop()
+	}
+	close(barrier)
+	<-donechan
+
+	time.Sleep(time.Second * 3)
+	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
+
+	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
 }

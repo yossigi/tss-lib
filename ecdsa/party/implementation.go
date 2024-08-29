@@ -86,6 +86,7 @@ type Impl struct {
 	errorChannel           chan<- *tss.Error
 	outChan                chan tss.Message
 	signatureOutputChannel chan *common.SignatureData
+	cryptoWorkChan         chan func()
 	maxTTl                 time.Duration
 	loadDistributionSeed   []byte
 }
@@ -206,6 +207,8 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 		go p.worker()
 	}
 
+	p.initCryptopool()
+
 	go p.cleanupWorker()
 	if err := p.keygenHandler.setup(outChannel, p.partyID); err != nil {
 		p.Stop()
@@ -213,6 +216,33 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	}
 
 	return nil
+}
+func (p *Impl) initCryptopool() {
+	p.cryptoWorkChan = make(chan func(), runtime.NumCPU())
+	p.parameters.Context = p.ctx
+	p.parameters.AsyncWorkComputation = func(f func()) error {
+		select {
+		case p.cryptoWorkChan <- f:
+			return nil
+		case <-p.ctx.Done():
+			return errors.New("context aborted")
+		}
+	}
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go p.cryptoWorker()
+	}
+}
+
+func (p *Impl) cryptoWorker() {
+	for {
+		select {
+		case f := <-p.cryptoWorkChan:
+			f()
+		case <-p.ctx.Done():
+			return
+		}
+	}
 }
 
 func (p *Impl) Stop() {
