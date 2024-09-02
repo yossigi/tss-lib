@@ -118,7 +118,7 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	s.digestToSigner = nmap
 }
 
-func (p *Impl) getPublic() *ecdsa.PublicKey {
+func (p *Impl) GetPublic() *ecdsa.PublicKey {
 	if p.keygenHandler == nil {
 		return nil
 	}

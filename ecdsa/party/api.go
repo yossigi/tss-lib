@@ -54,8 +54,8 @@ type FullParty interface {
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
 
-	// getPublic returns the public key of the FullParty
-	getPublic() *ecdsa.PublicKey
+	// GetPublic returns the public key of the FullParty
+	GetPublic() *ecdsa.PublicKey
 }
 
 // NewFullParty returns a new FullParty instance.

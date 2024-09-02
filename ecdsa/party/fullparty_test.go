@@ -411,7 +411,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 			a.True(ok)
 
 			if !verified {
-				a.True(validateSignature(anyParty.getPublic(), m, m.M))
+				a.True(validateSignature(anyParty.GetPublic(), m, m.M))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m)
 				continue
