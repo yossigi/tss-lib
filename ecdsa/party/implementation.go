@@ -387,6 +387,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 			*secrets,
 			p.outChan,
 			p.signatureOutputChannel,
+			DigestSize,
 		)
 
 		signer.state = started
