@@ -80,7 +80,7 @@ var (
 
 // NewMessageWrapper constructs a MessageWrapper from routing metadata and content
 // digest is an additional parameter
-func NewMessageWrapper(routing MessageRouting, content MessageContent, digest ...byte) *MessageWrapper {
+func NewMessageWrapper(routing MessageRouting, content MessageContent, trackingID ...byte) *MessageWrapper {
 	// marshal the content to the ProtoBuf Any type
 	any, _ := anypb.New(content)
 	// convert given PartyIDs to the wire format
@@ -98,7 +98,7 @@ func NewMessageWrapper(routing MessageRouting, content MessageContent, digest ..
 		From:                    routing.From.MessageWrapper_PartyID,
 		To:                      to,
 		Message:                 any,
-		Digest:                  digest,
+		TrackingID:              trackingID,
 	}
 }
 
