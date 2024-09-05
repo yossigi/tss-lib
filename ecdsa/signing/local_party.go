@@ -56,6 +56,9 @@ type (
 	localTempData struct {
 		localMessageStore
 
+		// used to track the session of the current running protocol.
+		trackingID []byte
+
 		// temp data (thrown away after sign) / round 1
 		w,
 		m,
@@ -102,17 +105,19 @@ type (
 
 func NewLocalParty(
 	msg *big.Int,
+	trackingID []byte,
 	params *tss.Parameters,
 	key keygen.LocalPartySaveData,
 	out chan<- tss.Message,
 	end chan<- *common.SignatureData,
 	fullBytesLen ...int) tss.Party {
-	return NewLocalPartyWithKDD(msg, params, key, nil, out, end, fullBytesLen...)
+	return NewLocalPartyWithKDD(msg, trackingID, params, key, nil, out, end, fullBytesLen...)
 }
 
 // NewLocalPartyWithKDD returns a party with key derivation delta for HD support
 func NewLocalPartyWithKDD(
 	msg *big.Int,
+	trackingID []byte,
 	params *tss.Parameters,
 	key keygen.LocalPartySaveData,
 	keyDerivationDelta *big.Int,
@@ -157,6 +162,9 @@ func NewLocalPartyWithKDD(
 	p.temp.pi1jis = make([]*mta.ProofBob, partyCount)
 	p.temp.pi2jis = make([]*mta.ProofBobWC, partyCount)
 	p.temp.vs = make([]*big.Int, partyCount)
+
+	p.temp.trackingID = make([]byte, len(trackingID))
+	copy(p.temp.trackingID, trackingID)
 	return p
 }
 

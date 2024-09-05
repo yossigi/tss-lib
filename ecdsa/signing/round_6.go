@@ -35,7 +35,7 @@ func (round *round6) Start() *tss.Error {
 		return round.WrapError(errors2.Wrapf(err, "NewZKVProof(bigVi, bigR, si, li)"))
 	}
 
-	r6msg := NewSignRound6Message(round.PartyID(), round.temp.DPower, piAi, piV, round.temp.m)
+	r6msg := NewSignRound6Message(round.PartyID(), round.temp.DPower, piAi, piV, round.temp.trackingID)
 	round.temp.signRound6Messages[round.PartyID().Index] = r6msg
 
 	return round.sendMessage(r6msg)

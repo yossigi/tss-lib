@@ -80,7 +80,7 @@ func (round *round5) Start() *tss.Error {
 	}
 
 	cmt := commitments.NewHashCommitment(round.Rand(), bigVi.X(), bigVi.Y(), bigAi.X(), bigAi.Y())
-	r5msg := NewSignRound5Message(round.PartyID(), cmt.C, round.temp.m)
+	r5msg := NewSignRound5Message(round.PartyID(), cmt.C, round.temp.trackingID)
 	round.temp.signRound5Messages[round.PartyID().Index] = r5msg
 
 	if err := round.sendMessage(r5msg); err != nil {

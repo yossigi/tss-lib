@@ -48,7 +48,7 @@ func (round *round4) Start() *tss.Error {
 		return round.WrapError(errors2.Wrapf(err, "NewZKProof(gamma, bigGamma)"))
 	}
 	round.temp.thetaInverse = thetaInverse
-	r4msg := NewSignRound4Message(round.PartyID(), round.temp.deCommit, piGamma, round.temp.m)
+	r4msg := NewSignRound4Message(round.PartyID(), round.temp.deCommit, piGamma, round.temp.trackingID)
 	round.temp.signRound4Messages[round.PartyID().Index] = r4msg
 
 	return round.sendMessage(r4msg)

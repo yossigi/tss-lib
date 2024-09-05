@@ -20,7 +20,7 @@ func (round *round8) Start() *tss.Error {
 	round.started = true
 	round.resetOK()
 
-	r8msg := NewSignRound8Message(round.PartyID(), round.temp.DTelda, round.temp.m)
+	r8msg := NewSignRound8Message(round.PartyID(), round.temp.DTelda, round.temp.trackingID)
 	round.temp.signRound8Messages[round.PartyID().Index] = r8msg
 
 	return round.sendMessage(r8msg)

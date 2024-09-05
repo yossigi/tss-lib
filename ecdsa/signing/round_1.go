@@ -72,7 +72,7 @@ func (round *round1) Start() *tss.Error {
 		if err != nil {
 			return round.WrapError(fmt.Errorf("failed to init mta: %v", err))
 		}
-		r1msg1 := NewSignRound1Message1(Pj, round.PartyID(), cA, pi, round.temp.m)
+		r1msg1 := NewSignRound1Message1(Pj, round.PartyID(), cA, pi, round.temp.trackingID)
 		round.temp.cis[j] = cA
 
 		if err := round.sendMessage(r1msg1); err != nil {
@@ -80,7 +80,7 @@ func (round *round1) Start() *tss.Error {
 		}
 	}
 
-	r1msg2 := NewSignRound1Message2(round.PartyID(), cmt.C, round.temp.m)
+	r1msg2 := NewSignRound1Message2(round.PartyID(), cmt.C, round.temp.trackingID)
 	round.temp.signRound1Message2s[i] = r1msg2
 
 	return round.sendMessage(r1msg2)
