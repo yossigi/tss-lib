@@ -44,7 +44,7 @@ func (round *round9) Start() *tss.Error {
 		return round.WrapError(errors.New("U doesn't equal T"), round.PartyID())
 	}
 
-	r9msg := NewSignRound9Message(round.PartyID(), round.temp.si, round.temp.m)
+	r9msg := NewSignRound9Message(round.PartyID(), round.temp.si, round.temp.trackingID)
 	round.temp.signRound9Messages[round.PartyID().Index] = r9msg
 
 	return round.sendMessage(r9msg)

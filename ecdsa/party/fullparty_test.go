@@ -411,7 +411,8 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 			a.True(ok)
 
 			if !verified {
-				a.True(validateSignature(anyParty.GetPublic(), m, m.M))
+
+				a.True(validateSignature(anyParty.GetPublic(), m, d[:]))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m)
 				continue
@@ -593,4 +594,54 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
 
 	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
+}
+
+func TestTrailingZerosInDigests(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
+
+	digestSet := make(map[Digest]bool)
+
+	hash1 := Digest{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	digestSet[hash1] = false
+
+	hash2 := Digest{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}
+	digestSet[hash2] = false
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*1000),
+		sigchan:         make(chan *common.SignatureData, 5),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	for digest := range digestSet {
+		go func(digest Digest) {
+			for _, party := range parties {
+				a.NoError(party.AsyncRequestNewSignature(digest))
+			}
+		}(digest)
+	}
+
+	time.Sleep(time.Second)
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	<-donechan
+	a.True(n.verifiedAllSignatures())
+
+	for _, party := range parties {
+		party.Stop()
+	}
 }

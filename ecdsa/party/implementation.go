@@ -286,7 +286,7 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 // The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
 // we don't sign messages blindly.
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
-	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetDigest()))
+	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetTrackingID()))
 
 	shouldSign := signer.attemptToCacheIfShouldNotSign(message)
 	if !shouldSign {
@@ -382,10 +382,12 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
+			digest[:],
 			p.makeParams(parties, selfIdInCurrentCommittee),
 			*secrets,
 			p.outChan,
 			p.signatureOutputChannel,
+			DigestSize,
 		)
 
 		signer.state = started

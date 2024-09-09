@@ -41,5 +41,5 @@ message MessageWrapper {
   google.protobuf.Any message = 10;
 
   // Used to differentiate between simultaneous signing protocol runs.
-  optional bytes Digest = 11;
+  optional bytes trackingID = 11;
 }

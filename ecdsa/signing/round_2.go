@@ -130,7 +130,7 @@ func (round *round2) Start() *tss.Error {
 		}
 		r2msg := NewSignRound2Message(
 			Pj, round.PartyID(), round.temp.c1jis[j], round.temp.pi1jis[j], round.temp.c2jis[j], round.temp.pi2jis[j],
-			round.temp.m)
+			round.temp.trackingID)
 
 		if err := round.sendMessage(r2msg); err != nil {
 			return err
