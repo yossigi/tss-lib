@@ -114,7 +114,7 @@ func (round *base) WaitingFor() []*tss.PartyID {
 }
 
 func (round *base) WrapError(err error, culprits ...*tss.PartyID) *tss.Error {
-	return tss.NewError(err, TaskName, round.number, round.PartyID(), culprits...)
+	return tss.NewTrackableError(err, TaskName, round.number, round.PartyID(), round.temp.trackingID, culprits...)
 }
 
 // ----- //
@@ -134,16 +134,20 @@ func (round *base) sendMessage(msg tss.ParsedMessage) *tss.Error {
 		return round.WrapError(errors.New("received nil Params"))
 	}
 
-	if round.Params().Context == nil {
-		round.out <- msg
-		return nil
-	}
-
 	select {
 	case round.out <- msg:
 		return nil
+
+	// if context is nil, select clause will simply ignore it.
 	case <-round.Params().Context.Done():
 		return round.WrapError(errors.New("round aborted"))
+	}
+}
+
+func (round *base) sendSignature() {
+	select {
+	case round.end <- round.data:
+	case <-round.Params().Context.Done():
 	}
 }
 
