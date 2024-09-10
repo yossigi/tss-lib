@@ -137,7 +137,6 @@ func (round *base) sendMessage(msg tss.ParsedMessage) *tss.Error {
 	select {
 	case round.out <- msg:
 		return nil
-
 	// if context is nil, select clause will simply ignore it.
 	case <-round.Params().Context.Done():
 		return round.WrapError(errors.New("round aborted"))
@@ -145,8 +144,17 @@ func (round *base) sendMessage(msg tss.ParsedMessage) *tss.Error {
 }
 
 func (round *base) sendSignature() {
+	// shouldn't ever reach these cases, but it is better to be safe than sorry.
+	if round.out == nil {
+		return
+	}
+	if round.Params() == nil {
+		return
+	}
+
 	select {
 	case round.end <- round.data:
+	// if context is nil, select clause will simply ignore it.
 	case <-round.Params().Context.Done():
 	}
 }
