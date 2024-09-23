@@ -17,10 +17,15 @@ type Error struct {
 	round    int
 	victim   *PartyID
 	culprits []*PartyID
+
+	trackingId []byte // optional.
 }
 
 func NewError(err error, task string, round int, victim *PartyID, culprits ...*PartyID) *Error {
 	return &Error{cause: err, task: task, round: round, victim: victim, culprits: culprits}
+}
+func NewTrackableError(err error, task string, round int, victim *PartyID, trackingId []byte, culprits ...*PartyID) *Error {
+	return &Error{cause: err, task: task, round: round, victim: victim, culprits: culprits, trackingId: trackingId}
 }
 
 func (err *Error) Unwrap() error { return err.cause }
@@ -46,3 +51,5 @@ func (err *Error) Error() string {
 	return fmt.Sprintf("task %s, party %v, round %d: %s",
 		err.task, err.victim, err.round, err.cause.Error())
 }
+
+func (err *Error) TrackingId() []byte { return err.trackingId }
