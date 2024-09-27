@@ -19,6 +19,7 @@ import (
 	"github.com/yossigi/tss-lib/v2/common"
 	"github.com/yossigi/tss-lib/v2/test"
 	"github.com/yossigi/tss-lib/v2/tss"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -444,16 +445,14 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 		return
 	}
 	a.NoError(err)
-	// parsedMsg doesn't contain routing, since it assumes this message arrive for this participant from outside.
-	// as a result we'll use the routing of the wireByte msgs.
-	parsedMsg, err := tss.ParseWireMessage(bz, routing.From, routing.IsBroadcast)
-	if expectErr && err != nil {
-		return
-	}
-	a.NoError(err)
 
 	if routing.IsBroadcast || routing.To == nil {
+
 		for pID, p := range idToParty {
+			parsedMsg, done := copyParsedMessage(a, bz, routing, expectErr)
+			if done {
+				return
+			}
 			if routing.From.GetId() == pID {
 				continue
 			}
@@ -468,12 +467,36 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 	}
 
 	for _, id := range routing.To {
+		parsedMsg, done := copyParsedMessage(a, bz, routing, expectErr)
+		if done {
+			return
+		}
+
 		err = idToParty[id.Id].Update(parsedMsg)
 		if expectErr && err != nil {
 			continue
 		}
 		a.NoError(err)
 	}
+}
+
+func copyParsedMessage(a *assert.Assertions, bz []byte, routing *tss.MessageRouting, expectErr bool) (tss.ParsedMessage, bool) {
+	frm := proto.Clone(routing.From).(*tss.MessageWrapper_PartyID)
+	from := &tss.PartyID{
+		MessageWrapper_PartyID: frm,
+		Index:                  -1, // Setting as -1 for malicious affect. (shouldn't hinder the library)
+	}
+
+	bts := make([]byte, len(bz))
+	copy(bts, bz)
+
+	parsedMsg, err := tss.ParseWireMessage(bts, from, routing.IsBroadcast)
+	if expectErr && err != nil {
+		return nil, true
+	}
+	a.NoError(err)
+
+	return parsedMsg, false
 }
 
 func makeTestParameters(a *assert.Assertions, participants, threshold int, location string) []Parameters {

@@ -18,6 +18,7 @@ import (
 	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
 	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
 	"github.com/yossigi/tss-lib/v2/tss"
+	"golang.org/x/crypto/sha3"
 )
 
 type KeygenHandler struct {
@@ -46,8 +47,8 @@ type singleSigner struct {
 
 	// used as buffer for messages received before starting signing.
 	// will be consumed once signing starts.
-	messageBuffer map[partyIdIndex][]tss.ParsedMessage
-
+	messageBuffer  map[partyIdIndex][]tss.ParsedMessage
+	PartyIdToIndex map[Digest]partyIdIndex
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
@@ -271,7 +272,8 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 	if len(signer.messageBuffer) > 0 {
 		for _, messages := range signer.messageBuffer {
 			for _, message := range messages {
-				ok, err := signer.localParty.Update(message)
+
+				ok, err := signer.feedLocalParty(message)
 				if !ok {
 					errReportFunc(err)
 				}
@@ -344,6 +346,28 @@ func (signer *singleSigner) attemptToCacheIfShouldNotSign(message tss.ParsedMess
 	return
 }
 
+func (signer *singleSigner) feedLocalParty(msg tss.ParsedMessage) (bool, *tss.Error) {
+	index, ok := signer.PartyIdToIndex[pidToDigest(msg.GetFrom().MessageWrapper_PartyID)]
+	if !ok {
+		return false, tss.NewTrackableError(fmt.Errorf("msg from non committee member"), "", -1, nil, msg.WireMsg().TrackingID, msg.GetFrom())
+	}
+
+	msg.GetFrom().Index = int(index)
+
+	if !msg.GetFrom().ValidateBasic() {
+		panic("MF")
+	}
+
+	return signer.localParty.Update(msg)
+}
+
+func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
+	bf := bytes.NewBuffer(nil)
+	bf.WriteString(pid.Id)
+	bf.Write(pid.Key)
+	return sha3.Sum256(bf.Bytes())
+}
+
 var ErrNotInSigningCommittee = errors.New("self not in signing committee")
 var ErrNoSigningKey = errors.New("no key to sign with")
 
@@ -380,6 +404,10 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 			return ErrNotInSigningCommittee
 		}
 
+		for _, party := range parties {
+			signer.PartyIdToIndex[pidToDigest(party.MessageWrapper_PartyID)] = partyIdIndex(party.Index)
+		}
+
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
 			digest[:],
@@ -413,12 +441,13 @@ func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner
 	signer, ok := s.digestToSigner[digestStr]
 	if !ok {
 		s.digestToSigner[digestStr] = &singleSigner{
-			time:          time.Now(),
-			messageBuffer: map[partyIdIndex][]tss.ParsedMessage{},
-			localParty:    nil,
-			once:          sync.Once{},
-			mtx:           sync.Mutex{},
-			state:         notStarted,
+			time:           time.Now(),
+			messageBuffer:  map[partyIdIndex][]tss.ParsedMessage{},
+			PartyIdToIndex: map[Digest]partyIdIndex{},
+			localParty:     nil,
+			once:           sync.Once{},
+			mtx:            sync.Mutex{},
+			state:          notStarted,
 		}
 
 		signer = s.digestToSigner[digestStr]
@@ -449,7 +478,7 @@ func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
 		return
 	}
 
-	ok, err := signer.localParty.Update(message)
+	ok, err := signer.feedLocalParty(message)
 	if !ok {
 		p.reportError(err)
 	}
