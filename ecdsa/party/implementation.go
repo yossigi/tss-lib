@@ -48,7 +48,7 @@ type singleSigner struct {
 	// used as buffer for messages received before starting signing.
 	// will be consumed once signing starts.
 	messageBuffer  map[partyIdIndex][]tss.ParsedMessage
-	PartyIdToIndex map[Digest]partyIdIndex
+	partyIdToIndex map[Digest]partyIdIndex
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
@@ -106,6 +106,7 @@ func (p *Impl) cleanupWorker() {
 
 func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	nmap := make(map[string]*singleSigner)
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -123,6 +124,7 @@ func (p *Impl) GetPublic() *ecdsa.PublicKey {
 	if p.keygenHandler == nil {
 		return nil
 	}
+
 	if p.keygenHandler.SavedData == nil {
 		return nil
 	}
@@ -160,6 +162,7 @@ func (k *KeygenHandler) keysFileName(selfId *tss.PartyID) string {
 
 func (k *KeygenHandler) storeKeygenData(toSave *keygen.LocalPartySaveData) error {
 	k.SavedData = toSave
+
 	content, err := json.Marshal(toSave)
 	if err != nil {
 		return err
@@ -211,8 +214,10 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	p.initCryptopool()
 
 	go p.cleanupWorker()
+
 	if err := p.keygenHandler.setup(outChannel, p.partyID); err != nil {
 		p.Stop()
+
 		return fmt.Errorf("keygen handler setup failed: %w", err)
 	}
 
@@ -277,7 +282,6 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 				if !ok {
 					errReportFunc(err)
 				}
-
 			}
 		}
 
@@ -315,6 +319,7 @@ func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
 
 func (signer *singleSigner) ensureStarted() *tss.Error {
 	var e *tss.Error
+
 	signer.once.Do(func() {
 		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
 			e = err
@@ -348,7 +353,7 @@ func (signer *singleSigner) attemptToCacheIfShouldNotSign(message tss.ParsedMess
 }
 
 func (signer *singleSigner) feedLocalParty(msg tss.ParsedMessage) (bool, *tss.Error) {
-	index, ok := signer.PartyIdToIndex[pidToDigest(msg.GetFrom().MessageWrapper_PartyID)]
+	index, ok := signer.partyIdToIndex[pidToDigest(msg.GetFrom().MessageWrapper_PartyID)]
 	if !ok {
 		return false, tss.NewTrackableError(fmt.Errorf("msg from non committee member"), "", -1, nil, msg.WireMsg().TrackingID, msg.GetFrom())
 	}
@@ -387,6 +392,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 
 	case notStarted:
 		randomnessSeed := append(p.loadDistributionSeed, digest[:]...)
+
 		parties, err := shuffleParties(randomnessSeed, p.parameters.Parties().IDs())
 		if err != nil {
 			return err
@@ -402,7 +408,7 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 		}
 
 		for _, party := range parties {
-			signer.PartyIdToIndex[pidToDigest(party.MessageWrapper_PartyID)] = partyIdIndex(party.Index)
+			signer.partyIdToIndex[pidToDigest(party.MessageWrapper_PartyID)] = partyIdIndex(party.Index)
 		}
 
 		signer.localParty = signing.NewLocalParty(
@@ -440,7 +446,7 @@ func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner
 		s.digestToSigner[digestStr] = &singleSigner{
 			time:           time.Now(),
 			messageBuffer:  map[partyIdIndex][]tss.ParsedMessage{},
-			PartyIdToIndex: map[Digest]partyIdIndex{},
+			partyIdToIndex: map[Digest]partyIdIndex{},
 			localParty:     nil,
 			once:           sync.Once{},
 			mtx:            sync.Mutex{},
@@ -485,8 +491,7 @@ func (p *Impl) reportError(newError *tss.Error) {
 	select {
 	case p.errorChannel <- newError:
 	case <-p.ctx.Done():
-	default:
-		// no one is waiting on error reporting channel/ no buffer.
+	default: // no one is waiting on error reporting channel/ no buffer.
 	}
 }
 
