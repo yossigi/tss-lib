@@ -277,6 +277,7 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 				if !ok {
 					errReportFunc(err)
 				}
+
 			}
 		}
 
@@ -353,10 +354,6 @@ func (signer *singleSigner) feedLocalParty(msg tss.ParsedMessage) (bool, *tss.Er
 	}
 
 	msg.GetFrom().Index = int(index)
-
-	if !msg.GetFrom().ValidateBasic() {
-		panic("MF")
-	}
 
 	return signer.localParty.Update(msg)
 }
