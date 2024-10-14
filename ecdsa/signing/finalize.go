@@ -80,6 +80,9 @@ func (round *finalization) Start() *tss.Error {
 		return round.WrapError(fmt.Errorf("signature verification failed"))
 	}
 
+	round.data.TrackingId = make([]byte, len(round.temp.trackingID)) // for debugging
+	copy(round.data.TrackingId, round.temp.trackingID)
+
 	round.sendSignature()
 
 	return nil

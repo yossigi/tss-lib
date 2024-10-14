@@ -24,4 +24,8 @@ message SignatureData {
 
     // M represents the original message digest that was signed M
     bytes m = 5;
+
+    // This value is set once a new local party is created.
+    // used to track the specific session when multiple sessions are running in parallel.
+    bytes tracking_id = 6;
 }
