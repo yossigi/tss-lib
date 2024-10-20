@@ -2,6 +2,7 @@ package party
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -111,14 +112,8 @@ func (st *signerTester) run(t *testing.T) {
 	}
 
 	for digest := range digestSet {
-
 		for _, party := range parties {
-			err := party.AsyncRequestNewSignature(digest)
-			if ErrNotInSigningCommittee == err {
-				continue
-			}
-
-			a.NoError(err)
+			fpSign(a, party, digest)
 		}
 	}
 
@@ -174,7 +169,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	}()
 
 	for i := 0; i < len(parties)-1; i++ {
-		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+		fpSign(a, parties[i], hash)
 	}
 
 	<-donechan
@@ -193,6 +188,15 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		party.Stop()
 	}
 
+}
+
+func fpSign(a *assert.Assertions, p FullParty, hash Digest) {
+	err := p.AsyncRequestNewSignature(hash)
+	if errors.Is(err, ErrNotInSigningCommittee) {
+		return
+	}
+
+	a.NoError(err)
 }
 func TestMultipleRequestToSignSameThing(t *testing.T) {
 	a := assert.New(t)
@@ -224,7 +228,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			go func(digest Digest) {
 				for _, party := range parties {
-					a.NoError(party.AsyncRequestNewSignature(digest))
+					fpSign(a, party, digest)
 				}
 			}(digest)
 		}
@@ -285,14 +289,14 @@ func testLateParties(t *testing.T, numLate int) {
 	}()
 
 	for i := 0; i < len(parties)-numLate; i++ {
-		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+		fpSign(a, parties[i], hash)
 	}
 
 	<-donechan
 	a.False(n.verifiedAllSignatures())
 
 	for i := len(parties) - numLate; i < len(parties); i++ {
-		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+		fpSign(a, parties[i], hash)
 	}
 
 	n.Timeout = time.Second * 20
@@ -329,7 +333,7 @@ func TestCleanup(t *testing.T) {
 	}
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
-	a.NoError(p1.AsyncRequestNewSignature(digest))
+	fpSign(a, p1, digest)
 
 	p1.signingHandler.mtx.Lock()
 	a.Lenf(p1.signingHandler.digestToSigner, 1, "expected 1 signer ")
@@ -596,7 +600,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	)
 
 	for i := 0; i < len(parties); i++ {
-		a.NoError(parties[i].AsyncRequestNewSignature(hash))
+		fpSign(a, parties[i], hash)
 	}
 
 	donechan := make(chan struct{})
@@ -648,7 +652,7 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	for digest := range digestSet {
 		go func(digest Digest) {
 			for _, party := range parties {
-				a.NoError(party.AsyncRequestNewSignature(digest))
+				fpSign(a, party, digest)
 			}
 		}(digest)
 	}
