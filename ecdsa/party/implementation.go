@@ -258,10 +258,6 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 	signer, err := p.getStartedSigner(digest)
 	if err != nil {
-		if errors.Is(err, ErrNotInSigningCommittee) {
-			return nil
-		}
-
 		return err
 	}
 
