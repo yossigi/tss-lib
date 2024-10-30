@@ -177,7 +177,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	// test:
 	impl.signingHandler.mtx.Lock()
-	singleSigner, ok := impl.signingHandler.digestToSigner[string(hash[:])]
+	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(hash[:])]
 	a.True(ok)
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
@@ -336,12 +336,12 @@ func TestCleanup(t *testing.T) {
 	fpSign(a, p1, digest)
 
 	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.digestToSigner, 1, "expected 1 signer ")
+	a.Lenf(p1.signingHandler.trackingIDToSigner, 1, "expected 1 signer ")
 	p1.signingHandler.mtx.Unlock()
 	<-time.After(maxTTL * 2)
 
 	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.digestToSigner, 0, "expected 0 signers ")
+	a.Lenf(p1.signingHandler.trackingIDToSigner, 0, "expected 0 signers ")
 	p1.signingHandler.mtx.Unlock()
 
 	for _, party := range parties {

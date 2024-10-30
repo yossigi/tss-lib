@@ -68,7 +68,8 @@ type FullParty interface {
 	// ResetCommittee Will restart signing protocol, allowing any banned participants to rejoin.
 	ResetCommittee(digest Digest) error
 
-	GetCurrentRound(digest Digest) int
+	// Note that using this interface to grab the round will not help fault-tolerance, since a FullParty that is not part of the committee
+	// will not know what round the committee is in.
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -104,9 +105,9 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		},
 
 		signingHandler: &signingHandler{
-			mtx:              sync.Mutex{},
-			digestToSigner:   map[string]*singleSigner{},
-			sigPartReadyChan: nil, // set up during Start()
+			mtx:                sync.Mutex{},
+			trackingIDToSigner: map[string]*singleSigner{},
+			sigPartReadyChan:   nil, // set up during Start()
 		},
 
 		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.PartyIDs)),
