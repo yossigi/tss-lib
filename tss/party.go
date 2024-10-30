@@ -30,6 +30,8 @@ type Party interface {
 	PartyID() *PartyID
 	String() string
 
+	RoundNumber() int
+
 	// Private lifecycle methods
 	setRound(Round) *Error
 	round() Round
@@ -111,6 +113,18 @@ func (p *BaseParty) lock() {
 
 func (p *BaseParty) unlock() {
 	p.mtx.Unlock()
+}
+
+func (p *BaseParty) RoundNumber() int {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	r := p.round()
+	if r == nil {
+		return -1
+	}
+
+	return r.RoundNumber()
 }
 
 // ----- //

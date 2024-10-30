@@ -35,6 +35,8 @@ type Parameters struct {
 
 type Digest [32]byte
 
+type SigningCommittee []*tss.PartyID
+
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
 	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
@@ -49,13 +51,25 @@ type FullParty interface {
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
 	// The signature protocol will not begin until Start() is called, even if this FullParty received
 	// messages over the network.
-	AsyncRequestNewSignature(Digest) error
+	// returns the signing committee and an error if something cannot be done.
+	AsyncRequestNewSignature(Digest) (SigningCommittee, error)
 
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() *ecdsa.PublicKey
+
+	// Fault tolerance helper functions:
+
+	// RemoveParticipantsFromSigningCommittee Will restart signing protocol, this time without specific participants.
+	// returns error if something cannot be done.
+	RemoveParticipantsFromSigningCommittee(digest Digest, partyID SigningCommittee) (SigningCommittee, error)
+
+	// ResetCommittee Will restart signing protocol, allowing any banned participants to rejoin.
+	ResetCommittee(digest Digest) error
+
+	GetCurrentRound(digest Digest) int
 }
 
 // NewFullParty returns a new FullParty instance.
