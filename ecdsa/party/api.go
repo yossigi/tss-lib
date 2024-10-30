@@ -51,8 +51,7 @@ type FullParty interface {
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
 	// The signature protocol will not begin until Start() is called, even if this FullParty received
 	// messages over the network.
-	// returns the signing committee and an error if something cannot be done.
-	AsyncRequestNewSignature(Digest) (SigningCommittee, error)
+	AsyncRequestNewSignature(Digest) error
 
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error

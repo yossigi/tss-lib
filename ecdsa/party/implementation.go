@@ -92,6 +92,21 @@ type Impl struct {
 	loadDistributionSeed   []byte
 }
 
+func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, partyID SigningCommittee) (SigningCommittee, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (p *Impl) ResetCommittee(digest Digest) error {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (p *Impl) GetCurrentRound(digest Digest) int {
+	// TODO implement me
+	panic("implement me")
+}
+
 func (p *Impl) cleanupWorker() {
 	for {
 		select {
@@ -289,7 +304,7 @@ func (signer *singleSigner) consumeBuffer(errReportFunc func(newError *tss.Error
 // The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
 // we don't sign messages blindly.
 func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
-	signer := p.signingHandler.getOrCreateSingleSigner(string(message.WireMsg().GetTrackingID()))
+	signer := p.getOrCreateSingleSigner(string(message.WireMsg().GetTrackingID()))
 
 	shouldSign := signer.attemptToCacheIfShouldNotSign(message)
 	if !shouldSign {
@@ -300,7 +315,7 @@ func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner
 }
 
 func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
-	signer := p.signingHandler.getOrCreateSingleSigner(string(digest[:]))
+	signer := p.getOrCreateSingleSigner(string(digest[:]))
 
 	if err := p.tryStartSigning(digest, signer); err != nil {
 		return nil, err
@@ -433,7 +448,9 @@ func (p *Impl) makeParams(parties []*tss.PartyID, selfIdInCurrentCommittee *tss.
 
 // getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.
 // the returned signer doesn't necessarily has a localParty instance, meaning it isn't allowed to sign yet.
-func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner {
+func (p *Impl) getOrCreateSingleSigner(digestStr string) *singleSigner {
+	s := p.signingHandler
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -448,8 +465,9 @@ func (s *signingHandler) getOrCreateSingleSigner(digestStr string) *singleSigner
 			mtx:            sync.Mutex{},
 			state:          notStarted,
 		}
-
 		signer = s.digestToSigner[digestStr]
+		// TODO: generate signing committee for this signer.
+
 	}
 
 	return signer
