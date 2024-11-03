@@ -35,7 +35,15 @@ type Parameters struct {
 
 type Digest [32]byte
 
-type SigningCommittee []*tss.PartyID
+type partyIDs []*tss.PartyID
+
+// UpdatedSigningInfo containing the new managment information after removing participants
+// from signing committee.
+type UpdatedSigningInfo struct {
+	NewSigningCommittee partyIDs
+	OldSigningCommittee partyIDs
+	NewTrackingID       []byte
+}
 
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
@@ -63,13 +71,7 @@ type FullParty interface {
 
 	// RemoveParticipantsFromSigningCommittee Will restart signing protocol, this time without specific participants.
 	// returns error if something cannot be done.
-	RemoveParticipantsFromSigningCommittee(digest Digest, partyID SigningCommittee) (SigningCommittee, error)
-
-	// ResetCommittee Will restart signing protocol, allowing any banned participants to rejoin.
-	// ResetCommittee(digest Digest) error
-
-	// Note that using this interface to grab the round will not help fault-tolerance, since a FullParty that is not part of the committee
-	// will not know what round the committee is in.
+	RemovePariticipantsFromSigning(digest Digest, toBeRemoved partyIDs) (*UpdatedSigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.

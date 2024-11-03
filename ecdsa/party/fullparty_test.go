@@ -90,13 +90,7 @@ func (st *signerTester) run(t *testing.T) {
 
 	parties, _ := createFullParties(a, st.participants, st.threshold, st.keygenLocation)
 
-	digestSet := make(map[Digest]bool)
-	for i := 0; i < st.numSignatures; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
-		hash := Digest{}
-		copy(hash[:], d)
-		digestSet[hash] = false
-	}
+	digestSet := createDigests(st.numSignatures)
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*1000),
@@ -143,11 +137,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -203,13 +193,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 
 	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	for i := 0; i < 1; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
-		hash := Digest{}
-		copy(hash[:], d)
-		digestSet[hash] = false
-	}
+	digestSet, _ := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*1000),
@@ -263,11 +247,7 @@ func testLateParties(t *testing.T, numLate int) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -312,6 +292,15 @@ func testLateParties(t *testing.T, numLate int) {
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+func createSingleDigest() (map[Digest]bool, Digest) {
+	digestSet := make(map[Digest]bool)
+	d := crypto.Keccak256([]byte("hello, world"))
+	hash := Digest{}
+	copy(hash[:], d)
+	digestSet[hash] = false
+	return digestSet, hash
 }
 
 func TestCleanup(t *testing.T) {
@@ -551,11 +540,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -671,4 +656,15 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+func createDigests(numDigests int) map[Digest]bool {
+	digestSet := make(map[Digest]bool)
+	for i := 0; i < numDigests; i++ {
+		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		hash := Digest{}
+		copy(hash[:], d)
+		digestSet[hash] = false
+	}
+	return digestSet
 }

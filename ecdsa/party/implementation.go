@@ -105,7 +105,7 @@ func hash(msg []byte) Digest {
 	return sha3.Sum256(msg)
 }
 
-func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, removed SigningCommittee) (SigningCommittee, error) {
+func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (*UpdatedSigningInfo, error) {
 
 	// create new seed and generate new committee:
 	newtrackid := seedFromSigningCommittee(digest, removed)
@@ -162,10 +162,9 @@ func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, removed Sig
 }
 
 func (signer *singleSigner) cleanManagementValues() {
-	panic("not ready.")
 }
 
-func seedFromSigningCommittee(digest Digest, parties SigningCommittee) []byte {
+func seedFromSigningCommittee(digest Digest, parties partyIDs) []byte {
 	seed := make([]byte, (len(parties)+1)*DigestSize)
 	for i, party := range parties {
 		tmpDigest := pidToDigest(party.MessageWrapper_PartyID)
