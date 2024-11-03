@@ -43,9 +43,6 @@ const (
 type singleSigner struct {
 	// time represents the moment this signleSigner is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
-
-	attemptNumber int
-
 	time   time.Time
 	digest *Digest
 	// This field might change during the lifetime of the signer.
@@ -110,8 +107,9 @@ func hash(msg []byte) Digest {
 
 func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, removed SigningCommittee) (SigningCommittee, error) {
 
-	// create new seed:
-	seed := p.makeShuffleSeed(p.makeShuffleSeed(seedFromSigningCommittee(digest, removed)))
+	// create new seed and generate new committee:
+	newtrackid := seedFromSigningCommittee(digest, removed)
+	seed := p.makeShuffleSeed(p.makeShuffleSeed(newtrackid))
 
 	all := p.parameters.Parties().IDs()
 	validParties := make([]*tss.PartyID, 0, len(all)-len(removed))
@@ -136,26 +134,50 @@ func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, removed Sig
 		return nil, err
 	}
 
-	// start editing the signer:
-	signer, err := p.getOrCreateSingleSigner(p.getTrackID(digest))
+	// changing the signer's inner state.
+	signer, err := p.getOrCreateSingleSigner(digest[:])
 	if err != nil {
 		return nil, err
 	}
 
 	signer.mtx.Lock()
-	parties = tss.SortPartyIDs(parties[:p.parameters.Threshold()+1])
+	signer.cleanManagementValues()
+	signer.trackingId = newtrackid
 
-	p.setSignerState(parties, signer)
+	p.setSignerState(tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]), signer)
 	signer.mtx.Unlock()
 
 	s := p.signingHandler
 
+	//ensuring the signer is found using its new trackingID.
 	s.mtx.Lock()
-	s.trackingIDToSigner[string(seed)] = signer // adding a way to find this signer according to the new trackid
+	s.trackingIDToSigner[string(newtrackid)] = signer
 	signer.mtx.Lock()
 
 	p.tryStartSigning(digest, signer)
 	return nil, err
+}
+
+func (signer *singleSigner) cleanManagementValues() {
+	panic("not ready.")
+	// signer.self = nil
+	// signer.state = notStarted
+	// signer.messageBuffer = map[partyIdIndex][]tss.ParsedMessage{}
+	// signer.localParty = nil // dropping any previous localParty instance.
+
+	// signer.time = time.Now()
+
+	// messageBuffer: map[partyIdIndex][]tss.ParsedMessage{},
+	// trackingId:    trackingId,
+
+	// digest: nil, // no digest yet.
+
+	// partyIdToIndex: map[Digest]partyIdIndex{},
+	// localParty:     nil,
+	// once:           sync.Once{},
+	// mtx:            sync.Mutex{},
+	// state:          notStarted,
+
 }
 
 func seedFromSigningCommittee(digest Digest, parties SigningCommittee) []byte {
@@ -194,7 +216,12 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 
 	currentTime := time.Now()
 	for digest, signer := range s.trackingIDToSigner {
-		if currentTime.Sub(signer.time) < maxTTL {
+
+		signer.mtx.Lock()
+		initTime := signer.time
+		signer.mtx.Unlock()
+
+		if currentTime.Sub(initTime) < maxTTL {
 			nmap[digest] = signer
 		}
 	}
@@ -523,7 +550,6 @@ func (p *Impl) getOrCreateSingleSigner(trackingId []byte) (*singleSigner, error)
 	signer, ok := s.trackingIDToSigner[strTrackingID]
 	if !ok {
 		s.trackingIDToSigner[strTrackingID] = &singleSigner{
-			attemptNumber: 0,
 
 			time:          time.Now(),
 			messageBuffer: map[partyIdIndex][]tss.ParsedMessage{},
