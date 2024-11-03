@@ -66,7 +66,7 @@ type FullParty interface {
 	RemoveParticipantsFromSigningCommittee(digest Digest, partyID SigningCommittee) (SigningCommittee, error)
 
 	// ResetCommittee Will restart signing protocol, allowing any banned participants to rejoin.
-	ResetCommittee(digest Digest) error
+	// ResetCommittee(digest Digest) error
 
 	// Note that using this interface to grab the round will not help fault-tolerance, since a FullParty that is not part of the committee
 	// will not know what round the committee is in.

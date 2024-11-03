@@ -46,8 +46,10 @@ type singleSigner struct {
 
 	attemptNumber int
 
-	time       time.Time
-	digest     *Digest
+	time   time.Time
+	digest *Digest
+	// This field might change during the lifetime of the signer.
+	// every failed attempt to sign will change this field with a new value.
 	trackingId []byte
 
 	// used as buffer for messages received before starting signing.
@@ -74,6 +76,7 @@ type signingHandler struct {
 
 	// might store the same signer multiple times: once for each tracking id.
 	// the signer itself holds the same TTL, and the number of attempts of signing.
+	// [There can be multiple mappings for the same signer].
 	trackingIDToSigner map[string]*singleSigner
 
 	sigPartReadyChan chan *common.SignatureData
@@ -101,9 +104,69 @@ type Impl struct {
 	loadDistributionSeed   []byte
 }
 
-func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, partyID SigningCommittee) (SigningCommittee, error) {
-	// TODO implement me
-	panic("implement me")
+func hash(msg []byte) Digest {
+	return sha3.Sum256(msg)
+}
+
+func (p *Impl) RemoveParticipantsFromSigningCommittee(digest Digest, removed SigningCommittee) (SigningCommittee, error) {
+
+	// create new seed:
+	seed := p.makeShuffleSeed(p.makeShuffleSeed(seedFromSigningCommittee(digest, removed)))
+
+	all := p.parameters.Parties().IDs()
+	validParties := make([]*tss.PartyID, 0, len(all)-len(removed))
+
+	if len(validParties) < p.parameters.Threshold()+1 {
+		return nil, errors.New("not enough parties")
+	}
+
+	set := map[Digest]struct{}{}
+	for _, party := range removed {
+		set[pidToDigest(party.MessageWrapper_PartyID)] = struct{}{}
+	}
+
+	for _, party := range all {
+		if _, ok := set[pidToDigest(party.MessageWrapper_PartyID)]; !ok {
+			validParties = append(validParties, party)
+		}
+	}
+
+	parties, err := shuffleParties(seed, validParties)
+	if err != nil {
+		return nil, err
+	}
+
+	// start editing the signer:
+	signer, err := p.getOrCreateSingleSigner(p.getTrackID(digest))
+	if err != nil {
+		return nil, err
+	}
+
+	signer.mtx.Lock()
+	parties = tss.SortPartyIDs(parties[:p.parameters.Threshold()+1])
+
+	p.setSignerState(parties, signer)
+	signer.mtx.Unlock()
+
+	s := p.signingHandler
+
+	s.mtx.Lock()
+	s.trackingIDToSigner[string(seed)] = signer // adding a way to find this signer according to the new trackid
+	signer.mtx.Lock()
+
+	p.tryStartSigning(digest, signer)
+	return nil, err
+}
+
+func seedFromSigningCommittee(digest Digest, parties SigningCommittee) []byte {
+	seed := make([]byte, (len(parties)+1)*DigestSize)
+	for i, party := range parties {
+		tmpDigest := pidToDigest(party.MessageWrapper_PartyID)
+		copy(seed[i*DigestSize:], tmpDigest[:])
+	}
+
+	copy(seed[len(parties)*DigestSize:], digest[:])
+	return seed
 }
 
 func (p *Impl) ResetCommittee(digest Digest) error {
@@ -326,7 +389,7 @@ func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner
 }
 
 func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
-	signer, err := p.getOrCreateSingleSigner(p.getTrackID(digest))
+	signer, err := p.getOrCreateSingleSigner(digest[:])
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +455,7 @@ func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
 	bf := bytes.NewBuffer(nil)
 	bf.WriteString(pid.Id)
 	bf.Write(pid.Key)
-	return sha3.Sum256(bf.Bytes())
+	return hash(bf.Bytes())
 }
 
 var ErrNotInSigningCommittee = errors.New("self not in signing committee")
@@ -420,9 +483,13 @@ func (p *Impl) tryStartSigning(digest Digest, signer *singleSigner) error {
 		return ErrNotInSigningCommittee
 
 	case notStarted:
+
+		trackid := make([]byte, len(signer.trackingId))
+		copy(trackid, signer.trackingId)
+
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			digest[:],
+			trackid,
 			p.makeParams(signer.comittee, signer.self),
 			*secrets,
 			p.outChan,
@@ -552,5 +619,6 @@ func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
 }
 
 func (p *Impl) getTrackID(digest Digest) []byte {
+
 	return digest[:] // TODO: later on, we might want to hash the digest.
 }
