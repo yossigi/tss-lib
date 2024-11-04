@@ -147,7 +147,7 @@ func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (
 	signer.cleanManagementValues()
 	signer.trackingId = newtrackid
 
-	p.unsafeSetSignerState(parties, signer)
+	// p.unsafeSetSignerState(parties, signer)
 	signer.mtx.Unlock()
 
 	s := p.signingHandler
@@ -543,6 +543,7 @@ func (p *Impl) getOrCreateSingleSigner(trackingId []byte) (*singleSigner, error)
 	if !ok {
 		s.trackingIDToSigner[strTrackingID] = &singleSigner{
 			time:          time.Now(),
+			self:          p.partyID,
 			messageBuffer: map[Digest][]tss.ParsedMessage{},
 			trackingId:    trackingId,
 
@@ -561,9 +562,7 @@ func (p *Impl) getOrCreateSingleSigner(trackingId []byte) (*singleSigner, error)
 			return nil, err
 		}
 
-		parties = tss.SortPartyIDs(parties[:p.parameters.Threshold()+1])
-
-		p.unsafeSetSignerState(parties, signer)
+		signer.unsafeSetCommittee(tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]))
 	}
 
 	return signer, nil
@@ -574,13 +573,22 @@ func (p *Impl) makeShuffleSeed(digest []byte) []byte {
 	return seed
 }
 
-func (p *Impl) unsafeSetSignerState(parties []*tss.PartyID, signer *singleSigner) {
-	if signer.self = p.selfInSigningCommittee(parties); signer.self == nil {
-		signer.state = notInCommittee
-	}
+func equalIDs(a, b *tss.PartyID) bool {
+	return a.Id == b.Id && bytes.Equal(a.Key, b.Key)
+}
 
+func (signer *singleSigner) unsafeSetCommittee(parties []*tss.PartyID) {
+	signer.partyIdToIndex = make(map[Digest]partyIdIndex, len(parties))
+
+	signer.state = notInCommittee
 	for _, party := range parties {
-		signer.partyIdToIndex[pidToDigest(party.MessageWrapper_PartyID)] = partyIdIndex(party.Index)
+		pidDigest := pidToDigest(party.MessageWrapper_PartyID)
+		signer.partyIdToIndex[pidDigest] = partyIdIndex(party.Index)
+
+		if equalIDs(party, signer.self) {
+			signer.self = party
+			signer.state = unset // we are in the committee, but we haven't started signing yet.
+		}
 	}
 
 	signer.comittee = parties
@@ -625,7 +633,7 @@ func (p *Impl) reportError(newError *tss.Error) {
 func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
 	for _, party := range parties {
 		// not checking moniker since it's for convenience only.
-		if party.Id == p.partyID.Id && bytes.Equal(party.Key, p.partyID.Key) {
+		if equalIDs(party, p.partyID) {
 			return party
 		}
 	}
