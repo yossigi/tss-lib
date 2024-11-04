@@ -35,14 +35,18 @@ type Parameters struct {
 
 type Digest [32]byte
 
-type partyIDs []*tss.PartyID
+type partyIDs []*tss.PartyID // like tss.SortedPartyIDs, but sorted is not enforced
 
 // UpdatedSigningInfo containing the new managment information after removing participants
 // from signing committee.
 type UpdatedSigningInfo struct {
-	NewSigningCommittee partyIDs
-	OldSigningCommittee partyIDs
+	NewSigningCommittee tss.SortedPartyIDs
+	OldSigningCommittee tss.SortedPartyIDs
 	NewTrackingID       []byte
+
+	// internal usage:
+	bufferMessages []tss.ParsedMessage
+	signer         *singleSigner
 }
 
 type FullParty interface {

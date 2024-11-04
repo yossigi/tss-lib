@@ -668,3 +668,64 @@ func createDigests(numDigests int) map[Digest]bool {
 	}
 	return digestSet
 }
+
+func TestChangingCommittee(t *testing.T) {
+	a := assert.New(t)
+	parties, _ := createFullParties(a, 5, 2, smallFixturesLocation) // threshold =2 means we need 3 in comittee to sign
+
+	digestSet, hash := createSingleDigest()
+	fmt.Println("old digest:", hash)
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*1000),
+		sigchan:         make(chan *common.SignatureData, 5),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+	}
+
+	partiesThatWillBeRemoved := make([]*tss.PartyID, 2)
+	for i := 0; i < 2; i++ {
+		partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
+	}
+
+	newCommittee := make(map[Digest]bool, 3)
+	for i := 2; i < 5; i++ {
+		newCommittee[pidToDigest(parties[i].(*Impl).partyID.MessageWrapper_PartyID)] = true
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	go func() {
+		for _, party := range parties {
+			fpSign(a, party, hash)
+		}
+	}()
+
+	go func() {
+		for _, p := range parties {
+			u, err := p.RemovePariticipantsFromSigning(hash, partiesThatWillBeRemoved)
+			a.NoError(err)
+
+			for _, pid := range u.NewSigningCommittee {
+				a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
+			}
+		}
+	}()
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	<-donechan
+
+	for _, party := range parties {
+		party.Stop()
+	}
+
+}
