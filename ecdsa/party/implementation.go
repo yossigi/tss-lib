@@ -410,9 +410,7 @@ func (p *Impl) setLocalParty(digest Digest, signer *singleSigner) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	d := Digest{}
-	copy(d[:], digest[:])
-	signer.digest = &d
+	signer.digest = &digest
 
 	switch signer.state {
 	case set:
@@ -567,7 +565,7 @@ func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
 }
 
 func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (*UpdatedSigningInfo, error) {
-	newtrackid := seedFromSigningCommittee(digest, removed)
+	newtrackid := makeRegenTrackid(digest, removed)
 
 	newcomittee, err := p.removedComittee(newtrackid, removed)
 	if err != nil {
@@ -582,11 +580,9 @@ func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (
 	signer := updated.signer
 	msgs := updated.bufferMessages
 
-	// can open locks now.
 	p.setLocalParty(digest, signer) // setting the local party.
 
 	for _, msg := range msgs {
-		// TODO: some of the messages being fed to the localParty might not be correct, causing the last round to fail.
 		ok, err := signer.feedLocalParty(msg)
 		if !ok {
 			p.reportError(err)
@@ -623,9 +619,7 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	signer.state = unset     // we are now unset.
 	signer.time = time.Now() // resetting the init time.
 
-	d := Digest{}
-	copy(d[:], digest[:])
-	signer.digest = &d
+	signer.digest = nil
 
 	// oldTrackindID := signer.trackingId
 	signer.trackingId = newtrackid // deleting the old one
@@ -681,9 +675,11 @@ func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedP
 	}
 
 	for _, party := range all {
-		if _, ok := set[pidToDigest(party.MessageWrapper_PartyID)]; !ok {
-			validParties = append(validParties, party)
+		if _, ok := set[pidToDigest(party.MessageWrapper_PartyID)]; ok {
+			continue
 		}
+
+		validParties = append(validParties, party)
 	}
 
 	parties, err := shuffleParties(seed, validParties)
@@ -694,7 +690,7 @@ func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedP
 	return tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]), nil
 }
 
-func seedFromSigningCommittee(digest Digest, parties partyIDs) []byte {
+func makeRegenTrackid(digest Digest, parties partyIDs) []byte {
 	seed := make([]byte, (len(parties)+1)*DigestSize)
 	for i, party := range parties {
 		tmpDigest := pidToDigest(party.MessageWrapper_PartyID)
@@ -702,7 +698,9 @@ func seedFromSigningCommittee(digest Digest, parties partyIDs) []byte {
 	}
 
 	copy(seed[len(parties)*DigestSize:], digest[:])
-	return seed
+
+	tmp := hash(seed)
+	return tmp[:]
 }
 
 func (p *Impl) ResetCommittee(digest Digest) error {

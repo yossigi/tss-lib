@@ -391,7 +391,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 				return
 			}
 
-			a.NoError(err)
+			a.NoErrorf(err, "unexpected error: %v", err.TrackingId())
 			a.FailNow("unexpected error")
 
 		// simulating the network:
@@ -671,7 +671,7 @@ func createDigests(numDigests int) map[Digest]bool {
 
 func TestChangingCommittee(t *testing.T) {
 	a := assert.New(t)
-	parties, _ := createFullParties(a, 5, 2, smallFixturesLocation) // threshold =2 means we need 3 in comittee to sign
+	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation) // threshold =2 means we need 3 in comittee to sign
 
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
@@ -685,13 +685,13 @@ func TestChangingCommittee(t *testing.T) {
 		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
 	}
 
-	partiesThatWillBeRemoved := make([]*tss.PartyID, 2)
-	for i := 0; i < 2; i++ {
+	partiesThatWillBeRemoved := make([]*tss.PartyID, 1)
+	for i := 0; i < 1; i++ {
 		partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
 	}
 
-	newCommittee := make(map[Digest]bool, 3)
-	for i := 2; i < 5; i++ {
+	newCommittee := make(map[Digest]bool, 4)
+	for i := 1; i < 5; i++ {
 		newCommittee[pidToDigest(parties[i].(*Impl).partyID.MessageWrapper_PartyID)] = true
 	}
 
@@ -723,7 +723,7 @@ func TestChangingCommittee(t *testing.T) {
 	}()
 
 	<-donechan
-
+	a.True(n.verifiedAllSignatures())
 	for _, party := range parties {
 		party.Stop()
 	}
