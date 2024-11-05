@@ -11,6 +11,8 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -362,6 +364,7 @@ func (signer *singleSigner) feedLocalParty(msg tss.ParsedMessage) (bool, *tss.Er
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	// fmt.Println("Recived msg of type:", msg.Type())
 	return signer.unsafeFeedLocalParty(msg)
 }
 
@@ -402,13 +405,17 @@ var ErrNoSigningKey = errors.New("no key to sign with")
 // setLocalParty is used to prepare for signing, it creates a localParty instance for the signer.
 // It can fail if the party isn't in the signing committee, or if there's no key to sign with.
 func (p *Impl) setLocalParty(digest Digest, signer *singleSigner) error {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
+	return p.unsafeSetLocalParty(signer, digest)
+}
+
+func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
 		return ErrNoSigningKey
 	}
-
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
 
 	signer.digest = &digest
 
@@ -420,13 +427,14 @@ func (p *Impl) setLocalParty(digest Digest, signer *singleSigner) error {
 		return ErrNotInSigningCommittee
 
 	case unset:
-
+		// setting the latest tracking id.
 		trackid := make([]byte, len(signer.trackingId))
-		copy(trackid, signer.trackingId) // setting the latest tracking id.
+		copy(trackid, signer.trackingId)
 
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(digest[:]),
-			trackid, // track id is what we use to identify the signer throughout messages.
+			// track id is what we use to identify the signer throughout messages.
+			trackid,
 			p.makeParams(signer.comittee, signer.self),
 			*secrets,
 			p.outChan,
@@ -553,19 +561,18 @@ func (p *Impl) reportError(newError *tss.Error) {
 	}
 }
 
-func (p *Impl) selfInSigningCommittee(parties []*tss.PartyID) *tss.PartyID {
-	for _, party := range parties {
-		// not checking moniker since it's for convenience only.
-		if equalIDs(party, p.partyID) {
-			return party
-		}
-	}
-
-	return nil
-}
-
 func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (*UpdatedSigningInfo, error) {
+	// sorting the removed parties to ensure deterministic results
+	// between different FullParties.
+	// For instance: party one sees {2,1} in the removed, and party two sees {1,2},
+	// to ensure both create the same tracking ID they sort it so both use {1,2}, when
+	// computing the new tracking ID.
+	slices.SortFunc(removed, func(a, b *tss.PartyID) int {
+		return strings.Compare(string(a.Key), string(b.Key))
+	})
+
 	newtrackid := makeRegenTrackid(digest, removed)
+	fmt.Println("New trackid:", newtrackid)
 
 	newcomittee, err := p.removedComittee(newtrackid, removed)
 	if err != nil {
@@ -574,13 +581,14 @@ func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (
 
 	updated, err := p.regenSigner(digest, newcomittee, newtrackid)
 	if err != nil {
+		if err == ErrNotInSigningCommittee {
+			return updated, nil
+		}
 		return nil, err
 	}
 
 	signer := updated.signer
 	msgs := updated.bufferMessages
-
-	p.setLocalParty(digest, signer) // setting the local party.
 
 	for _, msg := range msgs {
 		ok, err := signer.feedLocalParty(msg)
@@ -631,6 +639,9 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	signer.messageBuffer = map[Digest][]tss.ParsedMessage{} // dropping the old messages.
 
 	if unmerged, exists := s.trackingIDToSigner[string(newtrackid)]; exists && unmerged != signer {
+		unmerged.mtx.Lock()
+		defer unmerged.mtx.Unlock()
+
 		if (unmerged.digest != nil && signer.digest != nil) && (*unmerged.digest != *signer.digest) {
 			return nil, errors.New("new trackingid collided") // unfortunate. sha3 collison is very unlikely.
 		}
@@ -644,7 +655,11 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 		}
 	}
 
-	s.trackingIDToSigner[string(newtrackid)] = signer //ensuring the signer is found using its new trackingID too.
+	// ensuring the signer is found using its new trackingID too.
+	// potentially, writing over "unmerged" if it exists, so the new and set signer is used.
+	// Notice that multiple pointers to the same signer are stored,
+	// so incoming messages for different trackingIDs will get handled by that signer.
+	s.trackingIDToSigner[string(newtrackid)] = signer
 
 	return &UpdatedSigningInfo{
 		NewSigningCommittee: newcomittee,
@@ -653,7 +668,7 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 
 		bufferMessages: msgBuffer,
 		signer:         signer,
-	}, nil
+	}, p.unsafeSetLocalParty(signer, digest)
 }
 
 func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedPartyIDs, error) {
@@ -701,9 +716,4 @@ func makeRegenTrackid(digest Digest, parties partyIDs) []byte {
 
 	tmp := hash(seed)
 	return tmp[:]
-}
-
-func (p *Impl) ResetCommittee(digest Digest) error {
-	// TODO implement me
-	panic("implement me")
 }

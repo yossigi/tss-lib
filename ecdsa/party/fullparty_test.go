@@ -670,6 +670,7 @@ func createDigests(numDigests int) map[Digest]bool {
 }
 
 func TestChangingCommittee(t *testing.T) {
+	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation) // threshold =2 means we need 3 in comittee to sign
@@ -683,7 +684,7 @@ func TestChangingCommittee(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+		Timeout:         time.Second * 120 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
@@ -691,15 +692,16 @@ func TestChangingCommittee(t *testing.T) {
 	}
 
 	go func() {
+		fmt.Println("starting signing process with original comittee.")
 		for _, party := range parties {
 			fpSign(a, party, hash)
 		}
 	}()
 
 	go func() {
-		nrnds := 1 // TODO: increase this to 5
+		nrnds := 5 // TODO: increase this to 5
 		for rnd := 0; rnd < nrnds; rnd++ {
-			fmt.Println("changing comittee")
+			fmt.Println("changing comittee, starting signing process again.")
 
 			time.Sleep(time.Millisecond * 100) // letting the current signature run for a bit.
 
