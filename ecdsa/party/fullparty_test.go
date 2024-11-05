@@ -744,5 +744,97 @@ func TestChangingCommittee(t *testing.T) {
 	for _, party := range parties {
 		party.Stop()
 	}
+}
 
+func TestAttemptToSignByChangingComittee(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
+
+	digestSet, hash := createSingleDigest()
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
+		sigchan:         make(chan *common.SignatureData, len(parties)),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 10 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	go func() {
+		fmt.Println("starting signing process with original comittee.")
+		for _, party := range parties {
+			_, err := party.RemovePariticipantsFromSigning(hash, nil)
+			a.NoError(err)
+		}
+	}()
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	<-donechan
+	a.False(n.verifiedAllSignatures())
+	for _, party := range parties {
+		party.Stop()
+	}
+}
+
+func TestChangeComitteeThenRequestSigning(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
+	digestSet, hash := createSingleDigest()
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*1000),
+		sigchan:         make(chan *common.SignatureData, len(parties)),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 10 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	go func() {
+		fmt.Println("starting signing process with original comittee.")
+		for _, party := range parties {
+			_, err := party.RemovePariticipantsFromSigning(hash, nil)
+			a.NoError(err)
+		}
+	}()
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+	<-donechan
+
+	go func() {
+		time.Sleep(time.Second)
+		for _, p := range parties {
+			fpSign(a, p, hash)
+		}
+	}()
+	a.False(n.verifiedAllSignatures())
+	donechan2 := make(chan struct{})
+	go func() {
+		defer close(donechan2)
+		n.run(a)
+	}()
+	<-donechan2
+	a.True(n.verifiedAllSignatures())
+	for _, party := range parties {
+		party.Stop()
+	}
 }
