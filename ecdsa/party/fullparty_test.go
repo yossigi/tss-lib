@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -691,14 +692,23 @@ func TestChangingCommittee(t *testing.T) {
 		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
 	}
 
+	barrier := make(chan struct{})
 	go func() {
-		fmt.Println("starting signing process with original comittee.")
+		wg := sync.WaitGroup{}
 		for _, party := range parties {
-			fpSign(a, party, hash)
+			wg.Add(1)
+			p := party
+			go func() {
+				defer wg.Done()
+				fpSign(a, p, hash)
+			}()
 		}
+		wg.Wait()
+		close(barrier)
 	}()
 
 	go func() {
+		<-barrier
 		nrnds := 5 // TODO: increase this to 5
 		for rnd := 0; rnd < nrnds; rnd++ {
 			fmt.Println("changing comittee, starting signing process again.")
@@ -733,6 +743,7 @@ func TestChangingCommittee(t *testing.T) {
 		}
 	}()
 
+	time.Sleep(time.Second * 1)
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)
@@ -759,7 +770,7 @@ func TestAttemptToSignByChangingComittee(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 10 * time.Duration(len(digestSet)),
+		Timeout:         time.Second * 5 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
