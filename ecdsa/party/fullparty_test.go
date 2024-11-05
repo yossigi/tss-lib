@@ -743,7 +743,6 @@ func TestChangingCommittee(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(time.Second * 1)
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)

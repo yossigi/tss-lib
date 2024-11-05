@@ -427,6 +427,23 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 		return ErrNotInSigningCommittee
 
 	case unset:
+		// check if notInCommittee:
+		signer.state = notInCommittee
+		for _, v := range signer.comittee {
+			if equalIDs(v, signer.self) {
+				signer.state = set
+				// updating the self to a copy with a different index
+				// (matching the indices of the current committee).
+				signer.self = v
+
+				break
+			}
+		}
+
+		if signer.state != set {
+			return ErrNotInSigningCommittee
+		}
+
 		// setting the latest tracking id.
 		trackid := make([]byte, len(signer.trackingId))
 		copy(trackid, signer.trackingId)
@@ -445,8 +462,6 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
 			return err.Cause()
 		}
-
-		signer.state = set
 	}
 
 	return nil
@@ -511,15 +526,9 @@ func equalIDs(a, b *tss.PartyID) bool {
 func (signer *singleSigner) unsafeSetCommittee(parties []*tss.PartyID) {
 	signer.partyIdToIndex = make(map[Digest]partyIdIndex, len(parties))
 
-	signer.state = notInCommittee
 	for _, party := range parties {
 		pidDigest := pidToDigest(party.MessageWrapper_PartyID)
 		signer.partyIdToIndex[pidDigest] = partyIdIndex(party.Index)
-
-		if equalIDs(party, signer.self) {
-			signer.self = party
-			signer.state = unset // we are in the committee, but we haven't started signing yet.
-		}
 	}
 
 	signer.comittee = parties
@@ -623,6 +632,8 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	oldState := signer.state
+
 	signer.localParty = nil  // deleting the old localparty.
 	signer.state = unset     // we are now unset.
 	signer.time = time.Now() // resetting the init time.
@@ -661,14 +672,21 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	// so incoming messages for different trackingIDs will get handled by that signer.
 	s.trackingIDToSigner[string(newtrackid)] = signer
 
-	return &UpdatedSigningInfo{
+	retinfo := &UpdatedSigningInfo{
 		NewSigningCommittee: newcomittee,
 		OldSigningCommittee: oldComittee,
 		NewTrackingID:       newtrackid,
 
 		bufferMessages: msgBuffer,
 		signer:         signer,
-	}, p.unsafeSetLocalParty(signer, digest)
+	}
+
+	if oldState == unset {
+		return retinfo, nil
+
+	}
+
+	return retinfo, p.unsafeSetLocalParty(signer, digest)
 }
 
 func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedPartyIDs, error) {
