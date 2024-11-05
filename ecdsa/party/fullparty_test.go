@@ -671,28 +671,19 @@ func createDigests(numDigests int) map[Digest]bool {
 
 func TestChangingCommittee(t *testing.T) {
 	a := assert.New(t)
-	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation) // threshold =2 means we need 3 in comittee to sign
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation) // threshold =2 means we need 3 in comittee to sign
 
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, 5),
+		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
+		sigchan:         make(chan *common.SignatureData, len(parties)),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
-	}
-
-	partiesThatWillBeRemoved := make([]*tss.PartyID, 1)
-	for i := 0; i < 1; i++ {
-		partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
-	}
-
-	newCommittee := make(map[Digest]bool, 4)
-	for i := 1; i < 5; i++ {
-		newCommittee[pidToDigest(parties[i].(*Impl).partyID.MessageWrapper_PartyID)] = true
 	}
 
 	for _, p := range parties {
@@ -706,12 +697,36 @@ func TestChangingCommittee(t *testing.T) {
 	}()
 
 	go func() {
-		for _, p := range parties {
-			u, err := p.RemovePariticipantsFromSigning(hash, partiesThatWillBeRemoved)
-			a.NoError(err)
+		nrnds := 1 // TODO: increase this to 5
+		for rnd := 0; rnd < nrnds; rnd++ {
+			fmt.Println("changing comittee")
 
-			for _, pid := range u.NewSigningCommittee {
-				a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
+			time.Sleep(time.Millisecond * 100) // letting the current signature run for a bit.
+
+			for _, p := range parties {
+				// make them change comittee every 120ms,
+				// plus shuffle the order of the parties when telling them to replace the comittee.
+				nremoved := rnd
+				partiesThatWillBeRemoved := make([]*tss.PartyID, nremoved)
+				for i := 0; i < nremoved; i++ {
+					partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
+				}
+
+				newCommittee := map[Digest]bool{}
+				for i := nremoved; i < test.TestParticipants; i++ {
+					newCommittee[pidToDigest(parties[i].(*Impl).partyID.MessageWrapper_PartyID)] = true
+				}
+
+				seedPerParty := pidToDigest(p.(*Impl).partyID.MessageWrapper_PartyID)
+				rmvdCpy, err := shuffleParties(seedPerParty[:], partiesThatWillBeRemoved)
+				a.NoError(err)
+
+				u, err := p.RemovePariticipantsFromSigning(hash, rmvdCpy)
+				a.NoError(err)
+
+				for _, pid := range u.NewSigningCommittee {
+					a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
+				}
 			}
 		}
 	}()
