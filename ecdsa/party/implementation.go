@@ -273,30 +273,37 @@ func (p *Impl) Stop() {
 	p.cancelFunc()
 }
 
-func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
+func (p *Impl) AsyncRequestNewSignature(digest Digest) (*SigningInfo, error) {
 	signer, err := p.getStartedSigner(digest)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	// TODO: YOSSI: I'm not sure I like p.getStartedSigner, since it grabs a lock and then we release it,
+	// 		do you think i should merge the function above into this function since it's only used here?
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	info := &SigningInfo{
+		SigningCommittee: signer.comittee,
+		TrackingID:       signer.trackingId,
+		IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
+	}
+
 	if signer.state == notInCommittee {
-		return ErrNotInSigningCommittee
+		return info, nil
 	}
 
 	if signer.state != set {
-		return nil // might've changed before we got the lock. (due to the fault-tolerance)
+		return info, nil // might've changed before we got the lock. (due to the fault-tolerance)
 	}
 
 	if len(signer.messageBuffer) <= 0 {
-		return nil
+		return info, nil
 	}
 
 	for _, msgArr := range signer.messageBuffer {
 		for _, message := range msgArr {
-			// TODO: consider what to do with changed committee issues.
 			ok, err := signer.unsafeFeedLocalParty(message)
 			if !ok {
 				p.reportError(err)
@@ -304,7 +311,7 @@ func (p *Impl) AsyncRequestNewSignature(digest Digest) error {
 		}
 	}
 
-	return nil
+	return info, nil
 }
 
 // The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
@@ -399,7 +406,6 @@ func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
 	return hash(bf.Bytes())
 }
 
-var ErrNotInSigningCommittee = errors.New("self not in signing committee")
 var ErrNoSigningKey = errors.New("no key to sign with")
 
 // setLocalParty is used to prepare for signing, it creates a localParty instance for the signer.
@@ -438,7 +444,7 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 		return nil
 
 	case notInCommittee:
-		return ErrNotInSigningCommittee
+		return nil // not an error
 
 	case unset:
 		// check if notInCommittee:
@@ -630,6 +636,8 @@ func (p *Impl) resetSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
+	// Getting the signer for the digest -> one that hadn't seen any faults yet.
+	// adding the new information (trackingID, and the new committee), and resetting the signer.
 	noFaultsTrackid, noFaultsComittee := makeAdjustedTrackingId(digest, nil)
 	signer, err := p.unsafeGetOrCreateSingleSigner(noFaultsTrackid)
 	if err != nil {
@@ -641,7 +649,8 @@ func (p *Impl) resetSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 
 	unmerged, exists := s.trackingIDToSigner[string(newtrackid)]
 	if signer == unmerged {
-		// we already adjusted the signer. no need to do it again, return with the "new" info.
+		// we already reset this signer (the new trackid points to it too).
+		// no need to do it again, return with the "new" info.
 		return &UpdatedSigningInfo{
 			OldSigningCommittee: noFaultsComittee,
 			NewSigningInfo: SigningInfo{
@@ -672,7 +681,8 @@ func (p *Impl) resetSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	msgBuffer := bufferToArray(signer.messageBuffer)
 	signer.messageBuffer = map[Digest][]tss.ParsedMessage{} // dropping the old messages.
 
-	// if we have another different signer:
+	// We saw the trackid (probably because a different FullParty reset their signer before we did).
+	// performing a few checks, and attempting to merge the two signers into one.
 	if exists {
 		unmerged.mtx.Lock()
 		defer unmerged.mtx.Unlock()

@@ -67,7 +67,7 @@ type FullParty interface {
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
 	// The signature protocol will not begin until Start() is called, even if this FullParty received
 	// messages over the network.
-	AsyncRequestNewSignature(Digest) error
+	AsyncRequestNewSignature(Digest) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
@@ -76,7 +76,6 @@ type FullParty interface {
 	GetPublic() *ecdsa.PublicKey
 
 	// Fault tolerance helper functions:
-
 	// RemoveParticipantsFromSigningCommittee Will restart signing protocol, this time without specific participants.
 	// returns error if something cannot be done.
 	RemovePariticipantsFromSigning(digest Digest, toBeRemoved tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error)

@@ -2,7 +2,6 @@ package party
 
 import (
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -140,8 +139,6 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	digestSet, hash := createSingleDigest()
 
-	trackindId, _ := makeAdjustedTrackingId(hash, nil)
-
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
@@ -161,8 +158,10 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		n.run(a)
 	}()
 
+	var trackingId []byte
 	for i := 0; i < len(parties)-1; i++ {
-		fpSign(a, parties[i], hash)
+		info := fpSign(a, parties[i], hash)
+		trackingId = info.TrackingID
 	}
 
 	<-donechan
@@ -170,7 +169,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	// test:
 	impl.signingHandler.mtx.Lock()
-	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(trackindId)]
+	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(trackingId)]
 	a.True(ok)
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
@@ -183,13 +182,11 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 }
 
-func fpSign(a *assert.Assertions, p FullParty, hash Digest) {
-	err := p.AsyncRequestNewSignature(hash)
-	if errors.Is(err, ErrNotInSigningCommittee) {
-		return
-	}
-
+func fpSign(a *assert.Assertions, p FullParty, hash Digest) *SigningInfo {
+	info, err := p.AsyncRequestNewSignature(hash)
 	a.NoError(err)
+
+	return info
 }
 func TestMultipleRequestToSignSameThing(t *testing.T) {
 	a := assert.New(t)
