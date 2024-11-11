@@ -709,8 +709,7 @@ func TestChangingCommittee(t *testing.T) {
 
 	go func() {
 		<-barrier
-		nrnds := 5 // TODO: increase this to 5
-		for rnd := 0; rnd < nrnds; rnd++ {
+		for nremoved := 0; nremoved < 5; nremoved++ {
 			fmt.Println("changing comittee, starting signing process again.")
 
 			time.Sleep(time.Millisecond * 100) // letting the current signature run for a bit.
@@ -718,7 +717,7 @@ func TestChangingCommittee(t *testing.T) {
 			for _, p := range parties {
 				// make them change comittee every 120ms,
 				// plus shuffle the order of the parties when telling them to replace the comittee.
-				nremoved := rnd
+
 				partiesThatWillBeRemoved := make([]*tss.PartyID, nremoved)
 				for i := 0; i < nremoved; i++ {
 					partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
@@ -736,7 +735,11 @@ func TestChangingCommittee(t *testing.T) {
 				u, err := p.RemovePariticipantsFromSigning(hash, rmvdCpy)
 				a.NoError(err)
 
-				for _, pid := range u.NewSigningCommittee {
+				if u == nil {
+					continue
+				}
+
+				for _, pid := range u.NewSigningInfo.SigningCommittee {
 					a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
 				}
 			}

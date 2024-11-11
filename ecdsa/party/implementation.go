@@ -11,8 +11,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -411,6 +409,20 @@ func (p *Impl) setLocalParty(digest Digest, signer *singleSigner) error {
 	return p.unsafeSetLocalParty(signer, digest)
 }
 
+func isInComittee(self *tss.PartyID, comittee tss.UnSortedPartyIDs) bool {
+	return indexInComittee(self, tss.UnSortedPartyIDs(comittee)) != -1
+}
+
+func indexInComittee(self *tss.PartyID, comittee tss.UnSortedPartyIDs) int {
+	for i, v := range comittee {
+		if equalIDs(v, self) {
+			return i
+		}
+	}
+
+	return -1
+}
+
 func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 	secrets := p.keygenHandler.getSavedParams()
 	if secrets == nil {
@@ -428,21 +440,17 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 
 	case unset:
 		// check if notInCommittee:
-		signer.state = notInCommittee
-		for _, v := range signer.comittee {
-			if equalIDs(v, signer.self) {
-				signer.state = set
-				// updating the self to a copy with a different index
-				// (matching the indices of the current committee).
-				signer.self = v
 
-				break
-			}
-		}
-
-		if signer.state != set {
+		index := indexInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee))
+		if index == -1 {
+			signer.state = notInCommittee
 			return ErrNotInSigningCommittee
 		}
+
+		signer.state = set
+		// updating the self to a copy with a different index
+		// (matching the indices of the current committee).
+		signer.self = signer.comittee[index]
 
 		// setting the latest tracking id.
 		trackid := make([]byte, len(signer.trackingId))
@@ -570,20 +578,10 @@ func (p *Impl) reportError(newError *tss.Error) {
 	}
 }
 
-func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (*UpdatedSigningInfo, error) {
-	// sorting the removed parties to ensure deterministic results
-	// between different FullParties.
-	// For instance: party one sees {2,1} in the removed, and party two sees {1,2},
-	// to ensure both create the same tracking ID they sort it so both use {1,2}, when
-	// computing the new tracking ID.
-	slices.SortFunc(removed, func(a, b *tss.PartyID) int {
-		return strings.Compare(string(a.Key), string(b.Key))
-	})
+func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error) {
+	newtrackid, sortedRemoved := makeAdjustedTrackingId(digest, removed)
 
-	newtrackid := makeRegenTrackid(digest, removed)
-	fmt.Println("New trackid:", newtrackid)
-
-	newcomittee, err := p.removedComittee(newtrackid, removed)
+	newcomittee, err := p.removedComittee(newtrackid, sortedRemoved)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +589,10 @@ func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed partyIDs) (
 	updated, err := p.regenSigner(digest, newcomittee, newtrackid)
 	if err != nil {
 		if err == ErrNotInSigningCommittee {
-			return updated, nil
+			return &UpdatedSigningInfo{
+				OldSigningCommittee: nil,
+				NewSigningInfo:      SigningInfo{IsSigner: false},
+			}, nil
 		}
 		return nil, err
 	}
@@ -621,6 +622,8 @@ func bufferToArray(msgBuffer map[Digest][]tss.ParsedMessage) []tss.ParsedMessage
 func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtrackid []byte) (*UpdatedSigningInfo, error) {
 	signer, err := p.getOrCreateSingleSigner(digest[:])
 	if err != nil {
+		// TODO: if this error is not in signing comittee, we can still be in the new comittee!
+		// do not return here!!!
 		return nil, err
 	}
 
@@ -673,9 +676,12 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	s.trackingIDToSigner[string(newtrackid)] = signer
 
 	retinfo := &UpdatedSigningInfo{
-		NewSigningCommittee: newcomittee,
 		OldSigningCommittee: oldComittee,
-		NewTrackingID:       newtrackid,
+		NewSigningInfo: SigningInfo{
+			SigningCommittee: newcomittee,
+			TrackingID:       newtrackid,
+			IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
+		},
 
 		bufferMessages: msgBuffer,
 		signer:         signer,
@@ -683,13 +689,16 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 
 	if oldState == unset {
 		return retinfo, nil
-
 	}
 
-	return retinfo, p.unsafeSetLocalParty(signer, digest)
+	if err := p.unsafeSetLocalParty(signer, digest); err != nil {
+		return nil, err
+	}
+
+	return retinfo, nil
 }
 
-func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedPartyIDs, error) {
+func (p *Impl) removedComittee(newtrackid []byte, removed tss.SortedPartyIDs) (tss.SortedPartyIDs, error) {
 	seed := p.makeShuffleSeed(p.makeShuffleSeed(newtrackid))
 
 	all := p.parameters.Parties().IDs()
@@ -723,15 +732,38 @@ func (p *Impl) removedComittee(newtrackid []byte, removed partyIDs) (tss.SortedP
 	return tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]), nil
 }
 
-func makeRegenTrackid(digest Digest, parties partyIDs) []byte {
-	seed := make([]byte, (len(parties)+1)*DigestSize)
-	for i, party := range parties {
+func makeAdjustedTrackingId(digest Digest, faulties tss.UnSortedPartyIDs) ([]byte, tss.SortedPartyIDs) {
+	// Requesting sorted faulies since  it ensures deterministic results
+	// between different FullParties.
+	// For instance: party one sees {2,1} in the removed, and party two sees {1,2},
+	// to ensure both create the same tracking ID they sort it so both use {1,2}, when
+	// computing the new tracking ID.
+	sortedRemoved := tss.SortPartyIDs(faulties)
+
+	seed := make([]byte, (len(sortedRemoved)+1)*DigestSize)
+	for i, party := range sortedRemoved {
 		tmpDigest := pidToDigest(party.MessageWrapper_PartyID)
 		copy(seed[i*DigestSize:], tmpDigest[:])
 	}
 
-	copy(seed[len(parties)*DigestSize:], digest[:])
+	copy(seed[len(sortedRemoved)*DigestSize:], digest[:])
 
 	tmp := hash(seed)
-	return tmp[:]
+	return tmp[:], sortedRemoved
+}
+
+func (p *Impl) GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) SigningInfo {
+	if len(faulties) == 0 {
+		// TODO.
+		return SigningInfo{}
+	}
+
+	trackid, sortedRemoved := makeAdjustedTrackingId(digest, faulties)
+	comittee := make([]*tss.PartyID, 0, len(p.parameters.Parties().IDs())-len(sortedRemoved))
+
+	return SigningInfo{
+		SigningCommittee: comittee,
+		TrackingID:       trackid,
+		IsSigner:         isInComittee(p.partyID, comittee),
+	}
 }

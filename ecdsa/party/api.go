@@ -35,14 +35,18 @@ type Parameters struct {
 
 type Digest [32]byte
 
-type partyIDs []*tss.PartyID // like tss.SortedPartyIDs, but sorted is not enforced
+type SigningInfo struct {
+	SigningCommittee tss.SortedPartyIDs
+	TrackingID       []byte
+	IsSigner         bool
+}
 
 // UpdatedSigningInfo containing the new managment information after removing participants
 // from signing committee.
 type UpdatedSigningInfo struct {
-	NewSigningCommittee tss.SortedPartyIDs
 	OldSigningCommittee tss.SortedPartyIDs
-	NewTrackingID       []byte
+
+	NewSigningInfo SigningInfo
 
 	// internal usage:
 	bufferMessages []tss.ParsedMessage
@@ -75,7 +79,9 @@ type FullParty interface {
 
 	// RemoveParticipantsFromSigningCommittee Will restart signing protocol, this time without specific participants.
 	// returns error if something cannot be done.
-	RemovePariticipantsFromSigning(digest Digest, toBeRemoved partyIDs) (*UpdatedSigningInfo, error)
+	RemovePariticipantsFromSigning(digest Digest, toBeRemoved tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error)
+
+	GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) SigningInfo
 }
 
 // NewFullParty returns a new FullParty instance.
