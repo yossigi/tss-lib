@@ -324,7 +324,9 @@ func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner
 }
 
 func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
-	signer, err := p.getOrCreateSingleSigner(digest[:])
+	trackid, _ := makeAdjustedTrackingId(digest, nil)
+
+	signer, err := p.getOrCreateSingleSigner(trackid[:])
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +446,7 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner, digest Digest) error {
 		index := indexInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee))
 		if index == -1 {
 			signer.state = notInCommittee
-			return ErrNotInSigningCommittee
+			return nil
 		}
 
 		signer.state = set
@@ -487,11 +489,16 @@ func (p *Impl) makeParams(parties []*tss.PartyID, selfIdInCurrentCommittee *tss.
 // getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.
 // the returned signer doesn't necessarily has a localParty instance, meaning it isn't allowed to sign yet.
 func (p *Impl) getOrCreateSingleSigner(trackingId []byte) (*singleSigner, error) {
-	s := p.signingHandler
+	p.signingHandler.mtx.Lock()
+	defer p.signingHandler.mtx.Unlock()
+
+	return p.unsafeGetOrCreateSingleSigner(trackingId)
+}
+
+func (p *Impl) unsafeGetOrCreateSingleSigner(trackingId []byte) (*singleSigner, error) {
 	strTrackingID := string(trackingId)
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	s := p.signingHandler
 
 	signer, ok := s.trackingIDToSigner[strTrackingID]
 	if !ok {
@@ -586,15 +593,13 @@ func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed tss.UnSorte
 		return nil, err
 	}
 
-	updated, err := p.regenSigner(digest, newcomittee, newtrackid)
+	updated, err := p.resetSigner(digest, newcomittee, newtrackid)
 	if err != nil {
-		if err == ErrNotInSigningCommittee {
-			return &UpdatedSigningInfo{
-				OldSigningCommittee: nil,
-				NewSigningInfo:      SigningInfo{IsSigner: false},
-			}, nil
-		}
 		return nil, err
+	}
+
+	if !updated.NewSigningInfo.IsSigner {
+		return updated, nil
 	}
 
 	signer := updated.signer
@@ -619,29 +624,44 @@ func bufferToArray(msgBuffer map[Digest][]tss.ParsedMessage) []tss.ParsedMessage
 	return res
 }
 
-func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtrackid []byte) (*UpdatedSigningInfo, error) {
-	signer, err := p.getOrCreateSingleSigner(digest[:])
-	if err != nil {
-		// TODO: if this error is not in signing comittee, we can still be in the new comittee!
-		// do not return here!!!
-		return nil, err
-	}
-
+func (p *Impl) resetSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtrackid []byte) (*UpdatedSigningInfo, error) {
 	s := p.signingHandler
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
+	noFaultsTrackid, noFaultsComittee := makeAdjustedTrackingId(digest, nil)
+	signer, err := p.unsafeGetOrCreateSingleSigner(noFaultsTrackid)
+	if err != nil {
+		return nil, err
+	}
+
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	unmerged, exists := s.trackingIDToSigner[string(newtrackid)]
+	if signer == unmerged {
+		// we already adjusted the signer. no need to do it again, return with the "new" info.
+		return &UpdatedSigningInfo{
+			OldSigningCommittee: noFaultsComittee,
+			NewSigningInfo: SigningInfo{
+				SigningCommittee: signer.comittee, // probably the same.
+				TrackingID:       newtrackid,      // the same.
+				IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
+			},
+			bufferMessages: nil, // not supposed to make use of buffer in this case.
+			signer:         signer,
+		}, nil
+	}
+
+	// Resseting the signer, updating tracking id, and the committee.
 	oldState := signer.state
 
 	signer.localParty = nil  // deleting the old localparty.
 	signer.state = unset     // we are now unset.
 	signer.time = time.Now() // resetting the init time.
 
-	signer.digest = nil
+	signer.digest = &digest
 
 	// oldTrackindID := signer.trackingId
 	signer.trackingId = newtrackid // deleting the old one
@@ -652,7 +672,8 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 	msgBuffer := bufferToArray(signer.messageBuffer)
 	signer.messageBuffer = map[Digest][]tss.ParsedMessage{} // dropping the old messages.
 
-	if unmerged, exists := s.trackingIDToSigner[string(newtrackid)]; exists && unmerged != signer {
+	// if we have another different signer:
+	if exists {
 		unmerged.mtx.Lock()
 		defer unmerged.mtx.Unlock()
 
@@ -661,9 +682,9 @@ func (p *Impl) regenSigner(digest Digest, newcomittee tss.SortedPartyIDs, newtra
 		}
 
 		if unmerged.state == set {
-			// Shouldn't happen, but just in case.
-			signer.localParty = unmerged.localParty
-			signer.state = set
+			// TODO: what to do here? can this happen? this means TWO different signers, with the same digest
+			// but not the same tracking id. which is very unlikely.
+			return nil, errors.New("two signers with the same digest, different tracking id and one of them is set")
 		} else {
 			msgBuffer = append(msgBuffer, bufferToArray(unmerged.messageBuffer)...)
 		}
@@ -742,8 +763,8 @@ func makeAdjustedTrackingId(digest Digest, faulties tss.UnSortedPartyIDs) ([]byt
 
 	seed := make([]byte, (len(sortedRemoved)+1)*DigestSize)
 	for i, party := range sortedRemoved {
-		tmpDigest := pidToDigest(party.MessageWrapper_PartyID)
-		copy(seed[i*DigestSize:], tmpDigest[:])
+		tmp := pidToDigest(party.MessageWrapper_PartyID)
+		copy(seed[i*DigestSize:], tmp[:])
 	}
 
 	copy(seed[len(sortedRemoved)*DigestSize:], digest[:])
@@ -752,18 +773,17 @@ func makeAdjustedTrackingId(digest Digest, faulties tss.UnSortedPartyIDs) ([]byt
 	return tmp[:], sortedRemoved
 }
 
-func (p *Impl) GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) SigningInfo {
-	if len(faulties) == 0 {
-		// TODO.
-		return SigningInfo{}
-	}
-
+func (p *Impl) GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) (*SigningInfo, error) {
 	trackid, sortedRemoved := makeAdjustedTrackingId(digest, faulties)
-	comittee := make([]*tss.PartyID, 0, len(p.parameters.Parties().IDs())-len(sortedRemoved))
 
-	return SigningInfo{
-		SigningCommittee: comittee,
-		TrackingID:       trackid,
-		IsSigner:         isInComittee(p.partyID, comittee),
+	sortedComittee, err := p.removedComittee(trackid, sortedRemoved)
+	if err != nil {
+		return nil, err
 	}
+
+	return &SigningInfo{
+		SigningCommittee: sortedComittee,
+		TrackingID:       trackid,
+		IsSigner:         isInComittee(p.partyID, tss.UnSortedPartyIDs(sortedComittee)),
+	}, nil
 }

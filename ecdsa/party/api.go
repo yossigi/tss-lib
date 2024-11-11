@@ -81,7 +81,7 @@ type FullParty interface {
 	// returns error if something cannot be done.
 	RemovePariticipantsFromSigning(digest Digest, toBeRemoved tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error)
 
-	GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) SigningInfo
+	GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) (*SigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.

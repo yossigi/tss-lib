@@ -140,6 +140,8 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	digestSet, hash := createSingleDigest()
 
+	trackindId, _ := makeAdjustedTrackingId(hash, nil)
+
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
@@ -168,7 +170,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	// test:
 	impl.signingHandler.mtx.Lock()
-	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(hash[:])]
+	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(trackindId)]
 	a.True(ok)
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
@@ -670,7 +672,15 @@ func createDigests(numDigests int) map[Digest]bool {
 	return digestSet
 }
 
-func TestChangingCommittee(t *testing.T) {
+func TestFT(t *testing.T) {
+	t.Run("Changing Committee", testChangingCommittee)
+
+	t.Run("Attempt to sign by changing comittee", testAttemptToSignByChangingComittee)
+
+	t.Run("Change comittee then request signing", testChangeComitteeThenRequestSigning)
+}
+
+func testChangingCommittee(t *testing.T) {
 	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
@@ -759,7 +769,7 @@ func TestChangingCommittee(t *testing.T) {
 	}
 }
 
-func TestAttemptToSignByChangingComittee(t *testing.T) {
+func testAttemptToSignByChangingComittee(t *testing.T) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
@@ -800,7 +810,7 @@ func TestAttemptToSignByChangingComittee(t *testing.T) {
 	}
 }
 
-func TestChangeComitteeThenRequestSigning(t *testing.T) {
+func testChangeComitteeThenRequestSigning(t *testing.T) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
