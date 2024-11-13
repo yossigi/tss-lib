@@ -7,8 +7,15 @@
 syntax = "proto3";
 
 package binance.tsslib;
-option go_package = "./common";
+option go_package = "github.com/yossigi/tss-lib/v2/common";
 
+
+message TrackingID{
+    bytes Digest = 1;
+    repeated bool comittee = 2;
+    bytes auxilary_data = 3;
+  }
+  
 /*
  * Container for output signatures, mostly used for marshalling this data structure to a mobile app
  */
@@ -27,5 +34,5 @@ message SignatureData {
 
     // This value is set once a new local party is created.
     // used to track the specific session when multiple sessions are running in parallel.
-    bytes tracking_id = 6;
+    TrackingID tracking_id = 6;
 }
