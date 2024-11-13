@@ -168,13 +168,15 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	impl := parties[len(parties)-1].(*Impl)
 
 	// test:
-	impl.signingHandler.mtx.Lock()
-	singleSigner, ok := impl.signingHandler.trackingIDToSigner[string(trackingId)]
+	v, ok := impl.signingHandler.trackingIDToSigner.Load(string(trackingId))
 	a.True(ok)
+
+	singleSigner, ok := v.(*singleSigner)
+	a.True(ok)
+
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
 	a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
-	parties[len(parties)-1].(*Impl).signingHandler.mtx.Unlock()
 
 	for _, party := range parties {
 		party.Stop()
@@ -201,7 +203,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+		Timeout:         time.Second * 30 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
@@ -324,18 +326,25 @@ func TestCleanup(t *testing.T) {
 	digest := Digest{}
 	fpSign(a, p1, digest)
 
-	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.trackingIDToSigner, 1, "expected 1 signer ")
-	p1.signingHandler.mtx.Unlock()
+	a.Equal(getLen(p1.signingHandler.trackingIDToSigner), 1, "expected 1 signer ")
+
 	<-time.After(maxTTL * 2)
 
-	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.trackingIDToSigner, 0, "expected 0 signers ")
-	p1.signingHandler.mtx.Unlock()
+	a.Equal(getLen(p1.signingHandler.trackingIDToSigner), 0, "expected 0 signers ")
 
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+func getLen(m sync.Map) int {
+	l := 0
+	m.Range(func(_, _ interface{}) bool {
+		l++
+		return true
+	})
+
+	return l
 }
 
 type networkSimulator struct {

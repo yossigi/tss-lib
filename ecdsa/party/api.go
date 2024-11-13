@@ -116,8 +116,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		},
 
 		signingHandler: &signingHandler{
-			mtx:                sync.Mutex{},
-			trackingIDToSigner: map[string]*singleSigner{},
+			trackingIDToSigner: sync.Map{},
 			sigPartReadyChan:   nil, // set up during Start()
 		},
 
