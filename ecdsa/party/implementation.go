@@ -274,15 +274,22 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(digest Digest) (*SigningInfo, error) {
-	signer, err := p.getStartedSigner(digest)
+	trackid, _ := makeAdjustedTrackingId(digest, nil)
+
+	p.signingHandler.mtx.Lock()
+	defer p.signingHandler.mtx.Unlock()
+
+	signer, err := p.unsafeGetOrCreateSingleSigner(trackid[:])
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: YOSSI: I'm not sure I like p.getStartedSigner, since it grabs a lock and then we release it,
-	// 		do you think i should merge the function above into this function since it's only used here?
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
+
+	if err := p.unsafeSetLocalParty(signer, digest); err != nil {
+		return nil, err
+	}
 
 	info := &SigningInfo{
 		SigningCommittee: signer.comittee,
@@ -325,21 +332,6 @@ func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner
 	shouldSign := signer.attemptToCacheIfShouldNotSign(message)
 	if !shouldSign {
 		return nil, nil
-	}
-
-	return signer, nil
-}
-
-func (p *Impl) getStartedSigner(digest Digest) (*singleSigner, error) {
-	trackid, _ := makeAdjustedTrackingId(digest, nil)
-
-	signer, err := p.getOrCreateSingleSigner(trackid[:])
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.setLocalParty(digest, signer); err != nil {
-		return nil, err
 	}
 
 	return signer, nil
@@ -407,15 +399,6 @@ func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
 }
 
 var ErrNoSigningKey = errors.New("no key to sign with")
-
-// setLocalParty is used to prepare for signing, it creates a localParty instance for the signer.
-// It can fail if the party isn't in the signing committee, or if there's no key to sign with.
-func (p *Impl) setLocalParty(digest Digest, signer *singleSigner) error {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	return p.unsafeSetLocalParty(signer, digest)
-}
 
 func isInComittee(self *tss.PartyID, comittee tss.UnSortedPartyIDs) bool {
 	return indexInComittee(self, tss.UnSortedPartyIDs(comittee)) != -1
