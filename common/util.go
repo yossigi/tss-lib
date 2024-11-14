@@ -41,6 +41,12 @@ func ConvertByteArrayToBoolArray(byteArray []byte, numBools int) []bool {
 	return bools
 }
 
+const nilTrackID = "nilTrackID"
+
 func (t *TrackingID) ToString() string {
+	if t == nil {
+		return nilTrackID
+	}
+
 	return fmt.Sprintf("%x-%x-%x", t.Digest, t.PartiesState, t.AuxilaryData)
 }
