@@ -35,22 +35,16 @@ type Parameters struct {
 
 type Digest [32]byte
 
-type SigningInfo struct {
-	SigningCommittee tss.SortedPartyIDs
-	TrackingID       []byte
-	IsSigner         bool
+type SigningTask struct {
+	Digest       Digest
+	Faulties     []*tss.PartyID // Can be nil
+	AuxilaryData []byte         // can be nil
 }
 
-// UpdatedSigningInfo containing the new managment information after removing participants
-// from signing committee.
-type UpdatedSigningInfo struct {
-	OldSigningCommittee tss.SortedPartyIDs
-
-	NewSigningInfo SigningInfo
-
-	// internal usage:
-	bufferMessages []tss.ParsedMessage
-	signer         *singleSigner
+type SigningInfo struct {
+	SigningCommittee tss.SortedPartyIDs
+	TrackingID       *common.TrackingID
+	IsSigner         bool
 }
 
 type FullParty interface {
@@ -67,7 +61,10 @@ type FullParty interface {
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
 	// The signature protocol will not begin until Start() is called, even if this FullParty received
 	// messages over the network.
-	AsyncRequestNewSignature(Digest) (*SigningInfo, error)
+	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
+
+	// currently deletes the SigningTask from inner state
+	StopAsyncSignature(SigningTask) error
 
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
@@ -75,12 +72,7 @@ type FullParty interface {
 	// GetPublic returns the public key of the FullParty
 	GetPublic() *ecdsa.PublicKey
 
-	// Fault tolerance helper functions:
-	// RemoveParticipantsFromSigningCommittee Will restart signing protocol, this time without specific participants.
-	// returns error if something cannot be done.
-	RemovePariticipantsFromSigning(digest Digest, toBeRemoved tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error)
-
-	GetSigningInfo(digest Digest, faulties tss.UnSortedPartyIDs) (*SigningInfo, error)
+	GetSigningInfo(SigningTask) (*SigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -98,13 +90,18 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	}
 
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.PartyIDs))
+
+	keyToPos := make(map[string]int)
+	for i, pid := range p.PartyIDs {
+		keyToPos[string(pid.Key)] = i
+	}
+
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
-		ctx:         ctx,
-		cancelFunc:  cancelF,
-		partyID:     p.Self,
-		peerContext: pctx,
-		parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.PartyIDs), p.Threshold),
+		ctx:        ctx,
+		cancelFunc: cancelF,
+		partyID:    p.Self,
+		parameters: tss.NewParameters(tss.S256(), pctx, p.Self, len(p.PartyIDs), p.Threshold),
 
 		keygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
@@ -129,6 +126,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		maxTTl:                 p.MaxSignerTTL,
 
 		loadDistributionSeed: p.LoadDistributionSeed,
+
+		publickeyToPos: keyToPos,
 	}
 	return imp, nil
 }

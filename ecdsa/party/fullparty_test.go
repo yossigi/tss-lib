@@ -107,7 +107,11 @@ func (st *signerTester) run(t *testing.T) {
 
 	for digest := range digestSet {
 		for _, party := range parties {
-			fpSign(a, party, digest)
+			fpSign(a, party, SigningTask{
+				Digest:       digest,
+				Faulties:     nil,
+				AuxilaryData: nil,
+			})
 		}
 	}
 
@@ -158,9 +162,11 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		n.run(a)
 	}()
 
-	var trackingId []byte
+	var trackingId *common.TrackingID
 	for i := 0; i < len(parties)-1; i++ {
-		info := fpSign(a, parties[i], hash)
+		info := fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 		trackingId = info.TrackingID
 	}
 
@@ -168,7 +174,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	impl := parties[len(parties)-1].(*Impl)
 
 	// test:
-	v, ok := impl.signingHandler.trackingIDToSigner.Load(string(trackingId))
+	v, ok := impl.signingHandler.trackingIDToSigner.Load(trackingId.ToString())
 	a.True(ok)
 
 	singleSigner, ok := v.(*singleSigner)
@@ -184,8 +190,9 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 }
 
-func fpSign(a *assert.Assertions, p FullParty, hash Digest) *SigningInfo {
-	info, err := p.AsyncRequestNewSignature(hash)
+func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
+	// TODO
+	info, err := p.AsyncRequestNewSignature(st)
 	a.NoError(err)
 
 	return info
@@ -214,7 +221,9 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			go func(digest Digest) {
 				for _, party := range parties {
-					fpSign(a, party, digest)
+					fpSign(a, party, SigningTask{
+						Digest: digest,
+					})
 				}
 			}(digest)
 		}
@@ -271,14 +280,18 @@ func testLateParties(t *testing.T, numLate int) {
 	}()
 
 	for i := 0; i < len(parties)-numLate; i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	<-donechan
 	a.False(n.verifiedAllSignatures())
 
 	for i := len(parties) - numLate; i < len(parties); i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	n.Timeout = time.Second * 20
@@ -324,20 +337,22 @@ func TestCleanup(t *testing.T) {
 	}
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
-	fpSign(a, p1, digest)
+	fpSign(a, p1, SigningTask{
+		Digest: digest,
+	})
 
-	a.Equal(getLen(p1.signingHandler.trackingIDToSigner), 1, "expected 1 signer ")
+	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 1, "expected 1 signer ")
 
 	<-time.After(maxTTL * 2)
 
-	a.Equal(getLen(p1.signingHandler.trackingIDToSigner), 0, "expected 0 signers ")
+	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 0, "expected 0 signers ")
 
 	for _, party := range parties {
 		party.Stop()
 	}
 }
 
-func getLen(m sync.Map) int {
+func getLen(m *sync.Map) int {
 	l := 0
 	m.Range(func(_, _ interface{}) bool {
 		l++
@@ -594,7 +609,9 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	)
 
 	for i := 0; i < len(parties); i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	donechan := make(chan struct{})
@@ -646,7 +663,9 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	for digest := range digestSet {
 		go func(digest Digest) {
 			for _, party := range parties {
-				fpSign(a, party, digest)
+				fpSign(a, party, SigningTask{
+					Digest: digest,
+				})
 			}
 		}(digest)
 	}
@@ -679,6 +698,8 @@ func createDigests(numDigests int) map[Digest]bool {
 }
 
 func TestFT(t *testing.T) {
+	t.FailNow()
+	return
 	t.Run("Changing Committee", testChangingCommittee)
 
 	t.Run("Attempt to sign by changing comittee", testAttemptToSignByChangingComittee)
@@ -716,7 +737,9 @@ func testChangingCommittee(t *testing.T) {
 			p := party
 			go func() {
 				defer wg.Done()
-				fpSign(a, p, hash)
+				fpSign(a, p, SigningTask{
+					Digest: hash,
+				})
 			}()
 		}
 		wg.Wait()
@@ -748,16 +771,17 @@ func testChangingCommittee(t *testing.T) {
 				rmvdCpy, err := shuffleParties(seedPerParty[:], partiesThatWillBeRemoved)
 				a.NoError(err)
 
-				u, err := p.RemovePariticipantsFromSigning(hash, rmvdCpy)
+				_ = rmvdCpy
+				// u, err := p.RemovePariticipantsFromSigning(hash, rmvdCpy)
 				a.NoError(err)
 
-				if u == nil {
-					continue
-				}
+				// if u == nil {
+				// 	continue
+				// }
 
-				for _, pid := range u.NewSigningInfo.SigningCommittee {
-					a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
-				}
+				// for _, pid := range u.NewSigningInfo.SigningCommittee {
+				// 	a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
+				// }
 			}
 		}
 	}()
@@ -781,6 +805,7 @@ func testAttemptToSignByChangingComittee(t *testing.T) {
 	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
 
 	digestSet, hash := createSingleDigest()
+	_ = hash
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
@@ -798,8 +823,9 @@ func testAttemptToSignByChangingComittee(t *testing.T) {
 	go func() {
 		fmt.Println("starting signing process with original comittee.")
 		for _, party := range parties {
-			_, err := party.RemovePariticipantsFromSigning(hash, nil)
-			a.NoError(err)
+			_ = party
+			// _, err := party.RemovePariticipantsFromSigning(hash, nil)
+			// a.NoError(err)
 		}
 	}()
 
@@ -838,8 +864,9 @@ func testChangeComitteeThenRequestSigning(t *testing.T) {
 	go func() {
 		fmt.Println("starting signing process with original comittee.")
 		for _, party := range parties {
-			_, err := party.RemovePariticipantsFromSigning(hash, nil)
-			a.NoError(err)
+			_ = party
+			// _, err := party.RemovePariticipantsFromSigning(hash, nil)
+			// a.NoError(err)
 		}
 	}()
 	donechan := make(chan struct{})
@@ -852,7 +879,9 @@ func testChangeComitteeThenRequestSigning(t *testing.T) {
 	go func() {
 		time.Sleep(time.Second)
 		for _, p := range parties {
-			fpSign(a, p, hash)
+			fpSign(a, p, SigningTask{
+				Digest: hash,
+			})
 		}
 	}()
 	a.False(n.verifiedAllSignatures())
