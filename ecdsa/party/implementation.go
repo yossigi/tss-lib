@@ -105,15 +105,6 @@ func hash(msg []byte) Digest {
 	return sha3.Sum256(msg)
 }
 
-func (p *Impl) StopAsyncSignature(s SigningTask) error {
-	trackid := p.createTrackingID(s)
-
-	// TODO: Optimisation would be to add a cntx to each localParty and cancel it.
-	p.signingHandler.trackingIDToSigner.Delete(trackid.ToString()) // ensures signature is not created.
-
-	return nil
-}
-
 func (p *Impl) cleanupWorker() {
 	for {
 		select {
@@ -283,6 +274,11 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
+	// TODO: Problem, if we run AsyncRequestNewSignature, then call Stop async sig
+	// then request running this sig again: WE might face a problem where someone
+	// sent some values for some rounds, then changes them, which will cause the
+	// protocol to ABORT for that signature.
+	// Should we support restarting the exact same signature? (same committee same everything)
 	trackid := p.createTrackingID(s)
 
 	signer, err := p.getOrCreateSingleSigner(trackid)
@@ -387,12 +383,12 @@ func (signer *singleSigner) unsafeFeedLocalParty(msg tss.ParsedMessage) (bool, *
 		return false, tss.NewTrackableError(fmt.Errorf("can't feed unset signer"), "", -1, nil, msg.WireMsg().TrackingID)
 	}
 
-	// if !bytes.Equal(signer.trackingId, msg.WireMsg().TrackingID) {
-	// 	// tracking id changes due to fault tolarance order.
-	// 	// trackid is always advancing. so if we have something reaching this,
-	// 	// then it is old.
-	// 	return true, nil
-	// }
+	if signer.trackingId.ToString() != msg.WireMsg().GetTrackingID().ToString() {
+		// tracking id changes due to fault tolarance order.
+		// trackid is always advancing. so if we have something reaching this,
+		// then it is old.
+		return true, nil
+	}
 
 	return signer.localParty.Update(msg)
 }
@@ -660,136 +656,3 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 		IsSigner:         isInComittee(p.partyID, tss.UnSortedPartyIDs(sortedComittee)),
 	}, nil
 }
-
-// func (p *Impl) resetSigner(digest Digest, newtrackid *common.TrackingID) (*UpdatedSigningInfo, error) {
-// s := p.signingHandler
-
-// // Getting the signer for the digest -> one that hadn't seen any faults yet.
-// // adding the new information (trackingID, and the new committee), and resetting the signer.
-// noFaultsTrackid, noFaultsComittee := makeAdjustedTrackingId(digest, nil)
-// signer, err := p.getOrCreateSingleSigner(noFaultsTrackid)
-// if err != nil {
-// 	return nil, err
-// }
-
-// signer.mtx.Lock()
-// defer signer.mtx.Unlock()
-
-// v, loaded := s.trackingIDToSigner.LoadAndDelete(string(newtrackid))
-// unmerged, ok := v.(*singleSigner)
-// if !ok {
-// 	return nil, errors.New("internal error, expected *singleSigner")
-// }
-
-// if signer == unmerged {
-// 	// we already reset this signer (the new trackid points to it too).
-// 	// no need to do it again, return with the "new" info.
-// 	return &UpdatedSigningInfo{
-// 		OldSigningCommittee: noFaultsComittee,
-// 		NewSigningInfo: SigningInfo{
-// 			SigningCommittee: signer.comittee, // probably the same.
-// 			TrackingID:       newtrackid,      // the same.
-// 			IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
-// 		},
-// 		bufferMessages: nil, // not supposed to make use of buffer in this case.
-// 		signer:         signer,
-// 	}, nil
-// }
-
-// // Resseting the signer, updating tracking id, and the committee.
-// oldState := signer.state
-
-// signer.localParty = nil  // deleting the old localparty.
-// signer.state = unset     // we are now unset.
-// signer.time = time.Now() // resetting the init time.
-
-// signer.digest = &digest
-
-// // oldTrackindID := signer.trackingId
-// signer.trackingId = newtrackid // deleting the old one
-
-// oldComittee := signer.comittee
-// signer.unsafeSetCommittee(newcomittee)
-
-// msgBuffer := bufferToArray(signer.messageBuffer)
-// signer.messageBuffer = map[Digest][]tss.ParsedMessage{} // dropping the old messages.
-
-// // We saw the trackid (probably because a different FullParty reset their signer before we did).
-// // performing a few checks, and attempting to merge the two signers into one.
-// if loaded {
-// 	unmerged.mtx.Lock()
-// 	defer unmerged.mtx.Unlock()
-
-// 	if (unmerged.digest != nil && signer.digest != nil) && (*unmerged.digest != *signer.digest) {
-// 		return nil, errors.New("new trackingid collided") // unfortunate. sha3 collison is very unlikely.
-// 	}
-
-// 	if unmerged.state == set {
-// 		// TODO: what to do here? can this happen? this means TWO different signers, with the same digest
-// 		// but not the same tracking id. which is very unlikely.
-// 		return nil, errors.New("two signers with the same digest, different tracking id and one of them is set")
-// 	} else {
-// 		msgBuffer = append(msgBuffer, bufferToArray(unmerged.messageBuffer)...)
-// 	}
-// }
-
-// // ensuring the signer is found using its new trackingID too.
-// // potentially, writing over "unmerged" if it exists, so the new and set signer is used.
-// // Notice that multiple pointers to the same signer are stored,
-// // so incoming messages for different trackingIDs will get handled by that signer.
-// s.trackingIDToSigner.Store(string(newtrackid), signer)
-
-// retinfo := &UpdatedSigningInfo{
-// 	OldSigningCommittee: oldComittee,
-// 	NewSigningInfo: SigningInfo{
-// 		SigningCommittee: newcomittee,
-// 		TrackingID:       newtrackid,
-// 		IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
-// 	},
-
-// 	bufferMessages: msgBuffer,
-// 	signer:         signer,
-// }
-
-// if oldState == unset {
-// 	return retinfo, nil
-// }
-
-// if err := p.unsafeSetLocalParty(signer, digest); err != nil {
-// 	return nil, err
-// }
-
-// return retinfo, nil
-// 	return nil, fmt.Errorf("not implemented")
-// }
-
-// func (p *Impl) RemovePariticipantsFromSigning(digest Digest, removed tss.UnSortedPartyIDs) (*UpdatedSigningInfo, error) {
-// 	return nil, fmt.Errorf("not implemented")
-// newtrackid, sortedRemoved := makeAdjustedTrackingId(digest, removed)
-
-// newcomittee, err := p.computeComittee(newtrackid, sortedRemoved)
-// if err != nil {
-// 	return nil, err
-// }
-
-// updated, err := p.resetSigner(digest, newtrackid)
-// if err != nil {
-// 	return nil, err
-// }
-
-// if !updated.NewSigningInfo.IsSigner {
-// 	return updated, nil
-// }
-
-// signer := updated.signer
-// msgs := updated.bufferMessages
-
-// for _, msg := range msgs {
-// 	ok, err := signer.feedLocalParty(msg)
-// 	if !ok {
-// 		p.reportError(err)
-// 	}
-// }
-
-// return updated, nil
-// }

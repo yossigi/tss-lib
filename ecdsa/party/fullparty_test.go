@@ -415,7 +415,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 				return
 			}
 
-			a.NoErrorf(err, "unexpected error: %v", err.TrackingId())
+			a.NoErrorf(err, "unexpected error: %v, digest %v", err.Cause(), err.TrackingId())
 			a.FailNow("unexpected error")
 
 		// simulating the network:
@@ -697,17 +697,7 @@ func createDigests(numDigests int) map[Digest]bool {
 	return digestSet
 }
 
-func TestFT(t *testing.T) {
-	t.FailNow()
-	return
-	t.Run("Changing Committee", testChangingCommittee)
-
-	t.Run("Attempt to sign by changing comittee", testAttemptToSignByChangingComittee)
-
-	t.Run("Change comittee then request signing", testChangeComitteeThenRequestSigning)
-}
-
-func testChangingCommittee(t *testing.T) {
+func TestChangingCommittee(t *testing.T) {
 	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
@@ -748,40 +738,50 @@ func testChangingCommittee(t *testing.T) {
 
 	go func() {
 		<-barrier
-		for nremoved := 0; nremoved < 5; nremoved++ {
+		for nremoved := 1; nremoved < 5; nremoved++ {
 			fmt.Println("changing comittee, starting signing process again.")
 
-			time.Sleep(time.Millisecond * 100) // letting the current signature run for a bit.
+			time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
+			faulties := make([]*tss.PartyID, nremoved)
+			for i := 0; i < nremoved; i++ {
+				faulties[i] = parties[i].(*Impl).partyID
+			}
+			faultiesMap := map[Digest]bool{}
+			for _, pid := range faulties {
+				faultiesMap[pidToDigest(pid.MessageWrapper_PartyID)] = true
+			}
 
-			for _, p := range parties {
-				// make them change comittee every 120ms,
-				// plus shuffle the order of the parties when telling them to replace the comittee.
+			var prevFaulties []*tss.PartyID
+			if len(faulties)-1 > 0 {
+				prevFaulties = faulties[:len(faulties)-1]
+			}
+			for _, p_ := range parties {
+				p := p_.(*Impl)
 
-				partiesThatWillBeRemoved := make([]*tss.PartyID, nremoved)
-				for i := 0; i < nremoved; i++ {
-					partiesThatWillBeRemoved[i] = parties[i].(*Impl).partyID
-				}
+				// Dropping ongoing sig to ensure the state of prev sig is `unset`.
+				trackid := p.createTrackingID(SigningTask{
+					Digest:   hash,
+					Faulties: prevFaulties, // prev round faulties.
+				})
+				p.signingHandler.trackingIDToSigner.Delete(trackid.ToString()) // ensures signature is not created.
 
-				newCommittee := map[Digest]bool{}
-				for i := nremoved; i < test.TestParticipants; i++ {
-					newCommittee[pidToDigest(parties[i].(*Impl).partyID.MessageWrapper_PartyID)] = true
-				}
+				// shuffle the order of the parties when telling them to replace the comittee.
+				// (Ensures different ordered faulties array does not affect the signprotocol)
+				seedPerParty := pidToDigest(p.partyID.MessageWrapper_PartyID)
 
-				seedPerParty := pidToDigest(p.(*Impl).partyID.MessageWrapper_PartyID)
-				rmvdCpy, err := shuffleParties(seedPerParty[:], partiesThatWillBeRemoved)
+				shuffledFaulties, err := shuffleParties(seedPerParty[:], faulties)
 				a.NoError(err)
 
-				_ = rmvdCpy
-				// u, err := p.RemovePariticipantsFromSigning(hash, rmvdCpy)
+				info, err := p.AsyncRequestNewSignature(SigningTask{
+					Digest:       hash,
+					Faulties:     shuffledFaulties,
+					AuxilaryData: []byte{},
+				})
 				a.NoError(err)
 
-				// if u == nil {
-				// 	continue
-				// }
-
-				// for _, pid := range u.NewSigningInfo.SigningCommittee {
-				// 	a.Contains(newCommittee, pidToDigest(pid.MessageWrapper_PartyID))
-				// }
+				for _, pid := range info.SigningCommittee {
+					a.NotContains(faultiesMap, pidToDigest(pid.MessageWrapper_PartyID))
+				}
 			}
 		}
 	}()
@@ -793,104 +793,6 @@ func testChangingCommittee(t *testing.T) {
 	}()
 
 	<-donechan
-	a.True(n.verifiedAllSignatures())
-	for _, party := range parties {
-		party.Stop()
-	}
-}
-
-func testAttemptToSignByChangingComittee(t *testing.T) {
-	a := assert.New(t)
-
-	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
-
-	digestSet, hash := createSingleDigest()
-	_ = hash
-
-	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
-		sigchan:         make(chan *common.SignatureData, len(parties)),
-		errchan:         make(chan *tss.Error, 1),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 5 * time.Duration(len(digestSet)),
-	}
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
-	}
-
-	go func() {
-		fmt.Println("starting signing process with original comittee.")
-		for _, party := range parties {
-			_ = party
-			// _, err := party.RemovePariticipantsFromSigning(hash, nil)
-			// a.NoError(err)
-		}
-	}()
-
-	donechan := make(chan struct{})
-	go func() {
-		defer close(donechan)
-		n.run(a)
-	}()
-
-	<-donechan
-	a.False(n.verifiedAllSignatures())
-	for _, party := range parties {
-		party.Stop()
-	}
-}
-
-func testChangeComitteeThenRequestSigning(t *testing.T) {
-	a := assert.New(t)
-
-	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
-	digestSet, hash := createSingleDigest()
-
-	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, len(parties)),
-		errchan:         make(chan *tss.Error, 1),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 10 * time.Duration(len(digestSet)),
-	}
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
-	}
-
-	go func() {
-		fmt.Println("starting signing process with original comittee.")
-		for _, party := range parties {
-			_ = party
-			// _, err := party.RemovePariticipantsFromSigning(hash, nil)
-			// a.NoError(err)
-		}
-	}()
-	donechan := make(chan struct{})
-	go func() {
-		defer close(donechan)
-		n.run(a)
-	}()
-	<-donechan
-
-	go func() {
-		time.Sleep(time.Second)
-		for _, p := range parties {
-			fpSign(a, p, SigningTask{
-				Digest: hash,
-			})
-		}
-	}()
-	a.False(n.verifiedAllSignatures())
-	donechan2 := make(chan struct{})
-	go func() {
-		defer close(donechan2)
-		n.run(a)
-	}()
-	<-donechan2
 	a.True(n.verifiedAllSignatures())
 	for _, party := range parties {
 		party.Stop()

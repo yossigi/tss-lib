@@ -63,9 +63,6 @@ type FullParty interface {
 	// messages over the network.
 	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
-	// currently deletes the SigningTask from inner state
-	StopAsyncSignature(SigningTask) error
-
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
 
