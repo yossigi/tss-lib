@@ -55,7 +55,7 @@ type singleSigner struct {
 	// that contains up to maxStoragePerParty messages..
 	messageBuffer  map[Digest][]tss.ParsedMessage
 	partyIdToIndex map[Digest]partyIdIndex
-	comittee       tss.SortedPartyIDs
+	committee      tss.SortedPartyIDs
 	self           *tss.PartyID
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
@@ -301,9 +301,9 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	}
 
 	info := &SigningInfo{
-		SigningCommittee: signer.comittee,
+		SigningCommittee: signer.committee,
 		TrackingID:       signer.trackingId,
-		IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
+		IsSigner:         isInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee)),
 	}
 
 	if signer.state != set {
@@ -401,12 +401,12 @@ func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
 
 var ErrNoSigningKey = errors.New("no key to sign with")
 
-func isInComittee(self *tss.PartyID, comittee tss.UnSortedPartyIDs) bool {
-	return indexInComittee(self, tss.UnSortedPartyIDs(comittee)) != -1
+func isInCommittee(self *tss.PartyID, committee tss.UnSortedPartyIDs) bool {
+	return indexInCommittee(self, tss.UnSortedPartyIDs(committee)) != -1
 }
 
-func indexInComittee(self *tss.PartyID, comittee tss.UnSortedPartyIDs) int {
-	for i, v := range comittee {
+func indexInCommittee(self *tss.PartyID, committee tss.UnSortedPartyIDs) int {
+	for i, v := range committee {
 		if equalIDs(v, self) {
 			return i
 		}
@@ -430,8 +430,7 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner) error {
 
 	case unset:
 		// check if notInCommittee:
-
-		index := indexInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee))
+		index := indexInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee))
 		if index == -1 {
 			signer.state = notInCommittee
 			return nil
@@ -440,13 +439,13 @@ func (p *Impl) unsafeSetLocalParty(signer *singleSigner) error {
 		signer.state = set
 		// updating the self to a copy with a different index
 		// (matching the indices of the current committee).
-		signer.self = signer.comittee[index]
+		signer.self = signer.committee[index]
 
 		signer.localParty = signing.NewLocalParty(
 			(&big.Int{}).SetBytes(signer.digest[:]),
 			// track id is what we use to identify the signer throughout messages.
 			signer.trackingId,
-			p.makeParams(signer.comittee, signer.self),
+			p.makeParams(signer.committee, signer.self),
 			*secrets,
 			p.outChan,
 			p.signatureOutputChannel,
@@ -501,12 +500,12 @@ func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSi
 
 	// Only a single concurrent run of this method will pass this point (due to the syncMap output).
 	if !loaded {
-		possibleComittee, err := p.getValidComitteeMembers(signer.trackingId)
+		possibleCommittee, err := p.getValidCommitteeMembers(signer.trackingId)
 		if err != nil {
 			return nil, err
 		}
 
-		parties, err := shuffleParties(p.makeShuffleSeed(trackingId), possibleComittee)
+		parties, err := shuffleParties(p.makeShuffleSeed(trackingId), possibleCommittee)
 		if err != nil {
 			// TODO consider removing the signer from the map.
 			return nil, err
@@ -524,7 +523,7 @@ func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSi
 
 func (p *Impl) checkForEnoughParties(parties []*tss.PartyID) error {
 	if len(parties) < p.parameters.Threshold()+1 {
-		return fmt.Errorf("not enough valid parties in signer comittee: %d < %d", len(parties), p.parameters.Threshold()+1)
+		return fmt.Errorf("not enough valid parties in signer committee: %d < %d", len(parties), p.parameters.Threshold()+1)
 	}
 
 	return nil
@@ -547,7 +546,7 @@ func (signer *singleSigner) unsafeSetCommittee(parties []*tss.PartyID) {
 		signer.partyIdToIndex[pidDigest] = partyIdIndex(party.Index)
 	}
 
-	signer.comittee = parties
+	signer.committee = parties
 }
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
@@ -586,8 +585,8 @@ func (p *Impl) reportError(newError *tss.Error) {
 	}
 }
 
-func (p *Impl) computeComittee(newtrackid *common.TrackingID) (tss.SortedPartyIDs, error) {
-	validParties, err := p.getValidComitteeMembers(newtrackid)
+func (p *Impl) computeCommittee(newtrackid *common.TrackingID) (tss.SortedPartyIDs, error) {
+	validParties, err := p.getValidCommitteeMembers(newtrackid)
 	if err != nil {
 		return nil, err
 	}
@@ -635,10 +634,10 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 }
 
 // returns the parties that can still be part of the committee.
-func (p *Impl) getValidComitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
+func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
 	pids := p.parameters.Parties().IDs()
 
-	ValidComitteeMembers := make([]*tss.PartyID, 0, len(pids))
+	ValidCommitteeMembers := make([]*tss.PartyID, 0, len(pids))
 
 	if len(trackingId.PartiesState) < (len(pids)+7)/8 {
 		return nil, errors.New("invalid tracking id")
@@ -646,24 +645,24 @@ func (p *Impl) getValidComitteeMembers(trackingId *common.TrackingID) (tss.UnSor
 
 	for i, pid := range pids {
 		if trackingId.PartyStateOk(i) {
-			ValidComitteeMembers = append(ValidComitteeMembers, pid)
+			ValidCommitteeMembers = append(ValidCommitteeMembers, pid)
 		}
 	}
 
-	return tss.UnSortedPartyIDs(ValidComitteeMembers), nil
+	return tss.UnSortedPartyIDs(ValidCommitteeMembers), nil
 }
 
 func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	trackingId := p.createTrackingID(s)
 
-	sortedComittee, err := p.computeComittee(trackingId)
+	sortedCommittee, err := p.computeCommittee(trackingId)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SigningInfo{
-		SigningCommittee: sortedComittee,
+		SigningCommittee: sortedCommittee,
 		TrackingID:       trackingId,
-		IsSigner:         isInComittee(p.partyID, tss.UnSortedPartyIDs(sortedComittee)),
+		IsSigner:         isInCommittee(p.partyID, tss.UnSortedPartyIDs(sortedCommittee)),
 	}, nil
 }
