@@ -469,6 +469,7 @@ func (p *Impl) makeParams(parties []*tss.PartyID, selfIdInCurrentCommittee *tss.
 	return prms
 }
 
+// getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.
 func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSigner, error) {
 	s := p.signingHandler
 
