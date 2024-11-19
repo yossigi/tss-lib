@@ -68,8 +68,6 @@ type FullParty interface {
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() *ecdsa.PublicKey
-
-	GetSigningInfo(SigningTask) (*SigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.

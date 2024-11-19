@@ -30,8 +30,6 @@ type Party interface {
 	PartyID() *PartyID
 	String() string
 
-	RoundNumber() int
-
 	// Private lifecycle methods
 	setRound(Round) *Error
 	round() Round
@@ -115,18 +113,6 @@ func (p *BaseParty) unlock() {
 	p.mtx.Unlock()
 }
 
-func (p *BaseParty) RoundNumber() int {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-
-	r := p.round()
-	if r == nil {
-		return -1
-	}
-
-	return r.RoundNumber()
-}
-
 // ----- //
 
 func BaseStart(p Party, task string, prepare ...func(Round) *Error) *Error {
@@ -192,10 +178,10 @@ func BaseUpdate(p Party, msg ParsedMessage, task string) (ok bool, err *Error) {
 					return r(false, err)
 				}
 				rndNum := p.round().RoundNumber()
-				common.Logger.Infof("party %s: %s round %d started (tracking id: %v)", p.round().Params().PartyID(), task, rndNum, trackid)
+				common.Logger.Infof("party %s: %s round %d started (tracking id: %v)", p.round().Params().PartyID(), task, rndNum, trackid.ToString())
 			} else {
 				// finished! the round implementation will have sent the data through the `end` channel.
-				common.Logger.Infof("party %s: %s finished! (tracking id: %v)", p.PartyID(), task, trackid)
+				common.Logger.Infof("party %s: %s finished! (tracking id: %v)", p.PartyID(), task, trackid.ToString())
 			}
 			p.unlock()                      // recursive so can't defer after return
 			return BaseUpdate(p, msg, task) // re-run round update or finish)
