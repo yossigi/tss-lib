@@ -118,22 +118,35 @@ func (p *Impl) cleanupWorker() {
 
 func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	currentTime := time.Now()
-	s.trackingIDToSigner.Range(func(key, value interface{}) bool {
+
+	keysToDelete := make([]any, 0)
+
+	s.trackingIDToSigner.Range(func(key, value any) bool {
 		signer, ok := value.(*singleSigner)
 		if !ok {
+			// since this is not a signer, it should be removed.
+			keysToDelete = append(keysToDelete, key)
+
 			return true
 		}
 
-		signer.mtx.Lock()
-		initTime := signer.time
-		signer.mtx.Unlock()
-
-		if currentTime.Sub(initTime) >= maxTTL {
-			s.trackingIDToSigner.Delete(key)
+		if currentTime.Sub(signer.getInitTime()) >= maxTTL {
+			keysToDelete = append(keysToDelete, key)
 		}
 
 		return true // true to continue the iteration
 	})
+
+	for _, key := range keysToDelete {
+		s.trackingIDToSigner.Delete(key)
+	}
+}
+
+func (s *singleSigner) getInitTime() time.Time {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.time
 }
 
 func (p *Impl) GetPublic() *ecdsa.PublicKey {
