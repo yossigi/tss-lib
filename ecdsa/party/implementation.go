@@ -286,11 +286,6 @@ func (p *Impl) Stop() {
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
-	// TODO: Problem, if we run AsyncRequestNewSignature, then call Stop async sig
-	// then request running this sig again: WE might face a problem where someone
-	// sent some values for some rounds, then changes them, which will cause the
-	// protocol to ABORT for that signature.
-	// Should we support restarting the exact same signature? (same committee same everything)
 	trackid := p.createTrackingID(s)
 
 	signer, err := p.getOrCreateSingleSigner(trackid)
