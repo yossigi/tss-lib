@@ -86,11 +86,6 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.PartyIDs))
 
-	keyToPos := make(map[string]int)
-	for i, pid := range p.PartyIDs {
-		keyToPos[string(pid.Key)] = i
-	}
-
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
 		ctx:        ctx,
@@ -121,9 +116,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		maxTTl:                 p.MaxSignerTTL,
 
 		loadDistributionSeed: p.LoadDistributionSeed,
-
-		publickeyToPos: keyToPos,
 	}
+
 	return imp, nil
 }
 

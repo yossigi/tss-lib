@@ -97,8 +97,6 @@ type Impl struct {
 	cryptoWorkChan         chan func()
 	maxTTl                 time.Duration
 	loadDistributionSeed   []byte
-
-	publickeyToPos map[string]int
 }
 
 func hash(msg []byte) Digest {
