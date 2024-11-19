@@ -501,30 +501,42 @@ func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSi
 
 	// Only a single concurrent run of this method will pass this point (due to the syncMap output).
 	if !loaded {
-		possibleCommittee, err := p.getValidCommitteeMembers(signer.trackingId)
+		committee, err := p.computeCommittee(signer.trackingId)
 		if err != nil {
 			return nil, err
 		}
 
-		parties, err := shuffleParties(p.makeShuffleSeed(trackingId), possibleCommittee)
-		if err != nil {
-			// TODO consider removing the signer from the map.
-			return nil, err
-		}
-
-		if err := p.checkForEnoughParties(parties); err != nil {
-			return nil, err
-		}
-
-		signer.unsafeSetCommittee(tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]))
+		signer.unsafeSetCommittee(committee)
 	}
 
 	return signer, nil
 }
 
+func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs, error) {
+	validParties, err := p.getValidCommitteeMembers(trackid)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.checkForEnoughParties(validParties); err != nil {
+		return nil, err
+	}
+
+	parties, err := shuffleParties(p.makeShuffleSeed(trackid), validParties)
+	if err != nil {
+		return nil, err
+	}
+
+	return tss.SortPartyIDs(parties[:p.committeeSize()]), nil
+}
+
+func (p *Impl) committeeSize() int {
+	return p.parameters.Threshold() + 1
+}
+
 func (p *Impl) checkForEnoughParties(parties []*tss.PartyID) error {
-	if len(parties) < p.parameters.Threshold()+1 {
-		return fmt.Errorf("not enough valid parties in signer committee: %d < %d", len(parties), p.parameters.Threshold()+1)
+	if len(parties) < p.committeeSize() {
+		return fmt.Errorf("not enough valid parties in signer committee: %d < %d", len(parties), p.committeeSize())
 	}
 
 	return nil
@@ -586,29 +598,6 @@ func (p *Impl) reportError(newError *tss.Error) {
 	}
 }
 
-func (p *Impl) computeCommittee(newtrackid *common.TrackingID) (tss.SortedPartyIDs, error) {
-	validParties, err := p.getValidCommitteeMembers(newtrackid)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(validParties) < p.parameters.Threshold()+1 {
-		return nil, fmt.Errorf("not enough parties: %d < %d",
-			cap(validParties),
-			p.parameters.Threshold()+1,
-		)
-	}
-
-	seed := p.makeShuffleSeed(newtrackid)
-
-	parties, err := shuffleParties(seed, validParties)
-	if err != nil {
-		return nil, err
-	}
-
-	return tss.SortPartyIDs(parties[:p.parameters.Threshold()+1]), nil
-}
-
 func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	offlineMap := map[string]bool{}
 	for _, v := range s.Faulties {
@@ -651,19 +640,4 @@ func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSo
 	}
 
 	return tss.UnSortedPartyIDs(ValidCommitteeMembers), nil
-}
-
-func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
-	trackingId := p.createTrackingID(s)
-
-	sortedCommittee, err := p.computeCommittee(trackingId)
-	if err != nil {
-		return nil, err
-	}
-
-	return &SigningInfo{
-		SigningCommittee: sortedCommittee,
-		TrackingID:       trackingId,
-		IsSigner:         isInCommittee(p.partyID, tss.UnSortedPartyIDs(sortedCommittee)),
-	}, nil
 }
