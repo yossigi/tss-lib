@@ -518,8 +518,11 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs,
 		return nil, err
 	}
 
-	if err := p.checkForEnoughParties(validParties); err != nil {
-		return nil, err
+	if len(validParties) < p.committeeSize() {
+		return nil, fmt.Errorf("not enough valid parties in signer committee: %d < %d",
+			len(validParties),
+			p.committeeSize(),
+		)
 	}
 
 	parties, err := shuffleParties(p.makeShuffleSeed(trackid), validParties)
@@ -532,14 +535,6 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs,
 
 func (p *Impl) committeeSize() int {
 	return p.parameters.Threshold() + 1
-}
-
-func (p *Impl) checkForEnoughParties(parties []*tss.PartyID) error {
-	if len(parties) < p.committeeSize() {
-		return fmt.Errorf("not enough valid parties in signer committee: %d < %d", len(parties), p.committeeSize())
-	}
-
-	return nil
 }
 
 func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
