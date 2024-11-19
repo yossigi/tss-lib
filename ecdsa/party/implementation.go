@@ -509,7 +509,11 @@ func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSi
 
 	// Only a single concurrent run of this method will pass this point (due to the syncMap output).
 	if !loaded {
-		possibleComittee := p.getValidComitteeMembers(signer.trackingId)
+		possibleComittee, err := p.getValidComitteeMembers(signer.trackingId)
+		if err != nil {
+			return nil, err
+		}
+
 		parties, err := shuffleParties(p.makeShuffleSeed(trackingId), possibleComittee)
 		if err != nil {
 			// TODO consider removing the signer from the map.
@@ -591,7 +595,10 @@ func (p *Impl) reportError(newError *tss.Error) {
 }
 
 func (p *Impl) computeComittee(newtrackid *common.TrackingID) (tss.SortedPartyIDs, error) {
-	validParties := p.getValidComitteeMembers(newtrackid)
+	validParties, err := p.getValidComitteeMembers(newtrackid)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(validParties) < p.parameters.Threshold()+1 {
 		return nil, fmt.Errorf("not enough parties: %d < %d",
@@ -636,17 +643,22 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 }
 
 // returns the parties that can still be part of the committee.
-func (p *Impl) getValidComitteeMembers(trackingId *common.TrackingID) tss.UnSortedPartyIDs {
+func (p *Impl) getValidComitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
 	pids := p.parameters.Parties().IDs()
 
 	ValidComitteeMembers := make([]*tss.PartyID, 0, len(pids))
+
+	if len(trackingId.PartiesState) < (len(pids)+7)/8 {
+		return nil, errors.New("invalid tracking id")
+	}
+
 	for i, pid := range pids {
 		if trackingId.PartyStateOk(i) {
 			ValidComitteeMembers = append(ValidComitteeMembers, pid)
 		}
 	}
 
-	return tss.UnSortedPartyIDs(ValidComitteeMembers)
+	return tss.UnSortedPartyIDs(ValidComitteeMembers), nil
 }
 
 func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
