@@ -306,16 +306,8 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 		IsSigner:         isInComittee(signer.self, tss.UnSortedPartyIDs(signer.comittee)),
 	}
 
-	if signer.state == notInCommittee {
-		return info, nil
-	}
-
 	if signer.state != set {
 		return info, nil // might've changed before we got the lock. (due to the fault-tolerance)
-	}
-
-	if len(signer.messageBuffer) <= 0 {
-		return info, nil
 	}
 
 	for _, msgArr := range signer.messageBuffer {
