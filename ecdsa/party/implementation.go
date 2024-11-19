@@ -49,8 +49,8 @@ type singleSigner struct {
 	// every failed attempt to sign will change this field with a new value.
 	trackingId *common.TrackingID
 
-	// messageBuffer stores messages that are received before the signer is received
-	// the "Go" signal to start signing.
+	// messageBuffer stores messages that are received before the signer
+	// receives the signal to begin signing.
 	// sorted to bins by partyID digest. (not including index)
 	messageBuffer  map[Digest][]tss.ParsedMessage
 	partyIdToIndex map[Digest]partyIdIndex
