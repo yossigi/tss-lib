@@ -636,3 +636,19 @@ func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSo
 
 	return tss.UnSortedPartyIDs(ValidCommitteeMembers), nil
 }
+
+func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
+
+	trackingId := p.createTrackingID(s)
+
+	sortedCommittee, err := p.computeCommittee(trackingId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SigningInfo{
+		SigningCommittee: sortedCommittee,
+		TrackingID:       trackingId,
+		IsSigner:         isInCommittee(p.partyID, tss.UnSortedPartyIDs(sortedCommittee)),
+	}, nil
+}

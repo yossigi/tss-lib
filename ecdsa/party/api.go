@@ -68,6 +68,9 @@ type FullParty interface {
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() *ecdsa.PublicKey
+
+	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
+	GetSigningInfo(s SigningTask) (*SigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.
