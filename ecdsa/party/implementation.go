@@ -49,9 +49,10 @@ type singleSigner struct {
 	// every failed attempt to sign will change this field with a new value.
 	trackingId *common.TrackingID
 
-	// messageBuffer stores messages that are received before the signer
-	// receives the signal to begin signing.
-	// sorted to bins by partyID digest. (not including index)
+	// messageBuffer stores messages that are received before the signer receives the
+	// signal to initiate signing.
+	// It’s a map from hash(partyID.key || partyID.Id) to slices
+	// that contains up to maxStoragePerParty messages..
 	messageBuffer  map[Digest][]tss.ParsedMessage
 	partyIdToIndex map[Digest]partyIdIndex
 	comittee       tss.SortedPartyIDs
